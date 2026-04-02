@@ -10,6 +10,7 @@ import {
   createSkynetProxy,
 } from '@sidequestteams/mission-control-sdk/backend';
 import { SkynetClient } from '@sidequestteams/mission-control-sdk/skynet';
+import { KPI_REGISTRY, getKpisForRolePacks } from '@sidequestteams/mission-control-sdk/kpis';
 
 const PORT = process.env.MC_PORT ?? 4100;
 const MANIFEST_PATH = process.env.RUNTIME_MANIFEST_PATH ?? resolve('../../runtime-manifest.json');
@@ -33,13 +34,67 @@ app.get('/api/manifest', (_req, res) => {
   res.json({ team: teamBlock });
 });
 
-// Mount SDK route handlers
-app.use('/api/agents', createAgentsRouter({ skynetClient }));
-app.use('/api/productivity/kpis', createKpisRouter({ teamBlock }));
-app.use('/api/telemetry', createTelemetryRouter({ skynetClient }));
-app.use('/api/theme', createThemeRouter({ teamBlock }));
+// ── Agents routes ──────────────────────────────────────────────────────
+const agentsRouter = express.Router();
+createAgentsRouter({
+  async getAgents() {
+    return skynetClient.httpGet('/agents');
+  },
+  async getAgent(id: string) {
+    return skynetClient.httpGet(`/agents/${id}`);
+  },
+  async resetAgent(id: string) {
+    return skynetClient.sendCommand({ type: 'reset', target: id });
+  },
+})(agentsRouter);
+app.use('/api/agents', agentsRouter);
 
-// SSE proxy for Skynet events
+// ── KPI routes ─────────────────────────────────────────────────────────
+const kpisRouter = express.Router();
+createKpisRouter({
+  async getKpis(rolePacks) {
+    const packs = rolePacks ?? teamBlock?.role_packs ?? [];
+    const definitions = getKpisForRolePacks(packs);
+    return definitions.map((d) => ({
+      id: d.id,
+      value: 0,
+      freshness: 'mock' as const,
+      source: 'sdk-default',
+    }));
+  },
+  async getKpi(id: string) {
+    const definition = KPI_REGISTRY.find((d) => d.id === id);
+    if (!definition) return null;
+    return { id, value: 0, freshness: 'mock' as const, source: 'sdk-default' };
+  },
+  getRegistry() {
+    return KPI_REGISTRY;
+  },
+})(kpisRouter);
+app.use('/api/productivity/kpis', kpisRouter);
+
+// ── Telemetry routes ───────────────────────────────────────────────────
+const telemetryRouter = express.Router();
+createTelemetryRouter({
+  async getOverallMetrics() {
+    return skynetClient.httpGet('/metrics');
+  },
+  async getAgentTimeSeries(agentId: string, hours = 24) {
+    return skynetClient.httpGet(`/agents/${agentId}/timeseries?hours=${hours}`);
+  },
+})(telemetryRouter);
+app.use('/api/telemetry', telemetryRouter);
+
+// ── Theme route ────────────────────────────────────────────────────────
+const themeRouter = express.Router();
+createThemeRouter({
+  async getTeamBlock() {
+    return teamBlock ?? null;
+  },
+})(themeRouter);
+app.use('/api/theme', themeRouter);
+
+// ── SSE proxy for Skynet events ────────────────────────────────────────
 app.use('/api/events', createSkynetProxy(skynetClient));
 
 app.listen(PORT, () => {
