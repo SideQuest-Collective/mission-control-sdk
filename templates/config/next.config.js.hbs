@@ -1,11 +1,26 @@
 /** @type {import('next').NextConfig} */
+const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:3100';
+
 const nextConfig = {
+  output: 'standalone',
   reactStrictMode: true,
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? '/api',
     NEXT_PUBLIC_TEAM_SLUG: '{{teamSlug}}',
     NEXT_PUBLIC_TEAM_NAME: '{{teamName}}',
   },
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${BACKEND_URL}/api/:path*`,
+      },
+      {
+        source: '/ws',
+        destination: `${BACKEND_URL}/ws`,
+      },
+    ];
+  },
 };
 
-module.exports = nextConfig;
+export default nextConfig;
