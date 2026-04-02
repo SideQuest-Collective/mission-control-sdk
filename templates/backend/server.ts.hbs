@@ -48,7 +48,11 @@ createAgentsRouter({
     return skynetClient.httpGet(`/agents/${id}`);
   },
   async resetAgent(id: string) {
-    return skynetClient.sendCommand({ type: 'reset', target: id });
+    return skynetClient.sendCommand({
+      action: 'reset',
+      agentId: id,
+      timestamp: Date.now(),
+    });
   },
 })(agentsRouter);
 app.use('/api/agents', agentsRouter);
