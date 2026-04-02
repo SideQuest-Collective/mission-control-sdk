@@ -1,0 +1,47 @@
+import express from 'express';
+import cors from 'cors';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import {
+  createAgentsRouter,
+  createKpisRouter,
+  createTelemetryRouter,
+  createThemeRouter,
+  createSkynetProxy,
+} from '@sidequestteams/mission-control-sdk/backend';
+import { SkynetClient } from '@sidequestteams/mission-control-sdk/skynet';
+
+const PORT = process.env.MC_PORT ?? 4100;
+const MANIFEST_PATH = process.env.RUNTIME_MANIFEST_PATH ?? resolve('../../runtime-manifest.json');
+
+// Load runtime manifest team block
+const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8'));
+const teamBlock = manifest.team;
+
+// Initialize Skynet client from manifest connectivity
+const skynetClient = new SkynetClient({
+  wsUrl: teamBlock?.connectivity?.skynet?.ws_url ?? 'ws://skynet:9100',
+  httpUrl: teamBlock?.connectivity?.skynet?.http_url ?? 'http://skynet:9100',
+});
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Serve manifest team block
+app.get('/api/manifest', (_req, res) => {
+  res.json({ team: teamBlock });
+});
+
+// Mount SDK route handlers
+app.use('/api/agents', createAgentsRouter({ skynetClient }));
+app.use('/api/productivity/kpis', createKpisRouter({ teamBlock }));
+app.use('/api/telemetry', createTelemetryRouter({ skynetClient }));
+app.use('/api/theme', createThemeRouter({ teamBlock }));
+
+// SSE proxy for Skynet events
+app.use('/api/events', createSkynetProxy(skynetClient));
+
+app.listen(PORT, () => {
+  console.log(`[{{teamSlug}}] Mission Control backend listening on :${PORT}`);
+});

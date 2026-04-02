@@ -1,0 +1,50 @@
+{
+  "name": "@sidequestteams/mission-control-sdk",
+  "version": "0.1.0",
+  "description": "Mission Control SDK — UI primitives, theming, data hooks, Skynet client, backend handlers, and scaffold templates for per-team dashboards",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./primitives": "./dist/primitives/index.js",
+    "./widgets": "./dist/widgets/index.js",
+    "./theme": "./dist/theme/index.js",
+    "./hooks": "./dist/hooks/index.js",
+    "./skynet": "./dist/skynet/index.js",
+    "./backend": "./dist/backend/index.js",
+    "./kpis": "./dist/kpis/index.js",
+    "./templates/*": "./templates/*"
+  },
+  "files": [
+    "dist",
+    "templates",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "peerDependencies": {
+    "react": "^18.3.0 || ^19.0.0",
+    "react-dom": "^18.3.0 || ^19.0.0"
+  },
+  "dependencies": {
+    "react-grid-layout": "^1.5.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@types/react-grid-layout": "^1.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.1"
+  }
+}

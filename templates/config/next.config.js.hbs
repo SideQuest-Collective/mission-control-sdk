@@ -1,0 +1,11 @@
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  env: {
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100',
+    NEXT_PUBLIC_TEAM_SLUG: '{{teamSlug}}',
+    NEXT_PUBLIC_TEAM_NAME: '{{teamName}}',
+  },
+};
+
+module.exports = nextConfig;

@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --mc-primary: {{visualTheme.primary}};
+  --mc-accent: {{visualTheme.accent}};
+  --mc-background: {{visualTheme.background}};
+  --mc-surface: {{visualTheme.surface}};
+  --mc-text-primary: {{visualTheme.text_primary}};
+  --mc-text-secondary: {{visualTheme.text_secondary}};
+  --mc-status-success: {{visualTheme.status_working}};
+  --mc-status-warning: {{visualTheme.status_idle}};
+  --mc-status-error: {{visualTheme.status_offline}};
+  --mc-glow: {{visualTheme.glow}};
+}
+
+[data-theme="light"] {
+{{#if visualThemeLight}}
+  --mc-primary: {{visualThemeLight.primary}};
+  --mc-accent: {{visualThemeLight.accent}};
+  --mc-background: {{visualThemeLight.background}};
+  --mc-surface: {{visualThemeLight.surface}};
+  --mc-text-primary: {{visualThemeLight.text_primary}};
+  --mc-text-secondary: {{visualThemeLight.text_secondary}};
+  --mc-status-success: {{visualThemeLight.status_working}};
+  --mc-status-warning: {{visualThemeLight.status_idle}};
+  --mc-status-error: {{visualThemeLight.status_offline}};
+  --mc-glow: {{visualThemeLight.glow}};
+{{/if}}
+}
+
+body {
+  font-family: 'Satoshi', system-ui, sans-serif;
+  background-color: var(--mc-background);
+  color: var(--mc-text-primary);
+}

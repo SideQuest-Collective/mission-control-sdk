@@ -1,0 +1,27 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    './src/**/*.{ts,tsx}',
+    './node_modules/@sidequestteams/mission-control-sdk/dist/**/*.{js,jsx}',
+  ],
+  theme: {
+    extend: {
+      colors: {
+        mc: {
+          primary: 'var(--mc-primary)',
+          accent: 'var(--mc-accent)',
+          background: 'var(--mc-background)',
+          surface: 'var(--mc-surface)',
+          'text-primary': 'var(--mc-text-primary)',
+          'text-secondary': 'var(--mc-text-secondary)',
+        },
+      },
+      fontFamily: {
+        display: ['Clash Display', 'system-ui', 'sans-serif'],
+        sans: ['Satoshi', 'system-ui', 'sans-serif'],
+        mono: ['Commit Mono', 'monospace'],
+      },
+    },
+  },
+  plugins: [],
+};

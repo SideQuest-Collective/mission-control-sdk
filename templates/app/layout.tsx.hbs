@@ -1,0 +1,24 @@
+import type { Metadata } from 'next';
+import { ThemeProvider } from '@sidequestteams/mission-control-sdk/theme';
+import './globals.css';
+
+export const metadata: Metadata = {
+  title: '{{teamName}} — Mission Control',
+  description: 'Dashboard for {{teamName}}',
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en" data-theme="dark" suppressHydrationWarning>
+      <body>
+        <ThemeProvider manifestPath="/api/manifest">
+          {children}
+        </ThemeProvider>
+      </body>
+    </html>
+  );
+}
