@@ -52,6 +52,14 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     data_source: 'productivity_events',
   },
   {
+    id: 'completion_throughput',
+    name: 'Completion Throughput',
+    category: 'flow',
+    unit: 'count',
+    description: 'Tasks reaching verified-done with tool-backed evidence per window',
+    data_source: 'execution',
+  },
+  {
     id: 'reopen_rate',
     name: 'Reopen Rate',
     category: 'flow',

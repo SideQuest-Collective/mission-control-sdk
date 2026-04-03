@@ -6,7 +6,9 @@ export const ROLE_PACK_KPI_MAP: Record<string, string[]> = {
   development: [
     'cycle_time',
     'throughput',
+    'completion_throughput',
     'blocked_age',
+    'wip_by_owner',
     'tool_backed_runs',
     'verified_completions',
   ],
@@ -15,6 +17,7 @@ export const ROLE_PACK_KPI_MAP: Record<string, string[]> = {
     'reopen_rate',
     'cycle_time',
     'intent_only_runs',
+    'silent_accepted_runs',
   ],
   architecture: [
     'owner_concentration',
@@ -23,6 +26,7 @@ export const ROLE_PACK_KPI_MAP: Record<string, string[]> = {
     'stale_lanes',
   ],
   operations: [
+    'pickup_latency',
     'intervention_effectiveness',
     'no_signal_rate',
     'retarget_breaches',
