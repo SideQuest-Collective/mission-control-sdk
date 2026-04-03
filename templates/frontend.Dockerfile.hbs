@@ -1,18 +1,30 @@
 FROM node:22-alpine AS base
-WORKDIR /app
+WORKDIR /workspace
 
-# Install dependencies
-COPY package.json package-lock.json* ./
+FROM base AS deps
+COPY mission-control-sdk ./mission-control-sdk
+COPY {{generatedProjectPath}}/package*.json ./{{generatedProjectPath}}/
+WORKDIR /workspace/{{generatedProjectPath}}
 RUN npm ci 2>/dev/null || npm install
 
-# Copy source and config
-COPY src/ ./src/
-COPY next.config.js tailwind.config.js tsconfig.json postcss.config.js ./
+FROM deps AS build
+ARG BACKEND_URL=http://localhost:3100
+ENV BACKEND_URL=${BACKEND_URL}
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY {{generatedProjectPath}}/src/ ./src/
+COPY {{generatedProjectPath}}/next.config.js {{generatedProjectPath}}/tailwind.config.js {{generatedProjectPath}}/tsconfig.json {{generatedProjectPath}}/postcss.config.js ./
+RUN mkdir -p public && npm run build:frontend
 
-# Build
-RUN npx next build
+FROM node:22-alpine AS runtime
+WORKDIR /app
 
-EXPOSE 3001
+ENV NODE_ENV=production
 ENV PORT=3001
 ENV HOSTNAME=0.0.0.0
-CMD ["npx", "next", "start"]
+
+COPY --from=build /workspace/{{generatedProjectPath}}/.next/standalone ./
+COPY --from=build /workspace/{{generatedProjectPath}}/.next/static ./.next/static
+COPY --from=build /workspace/{{generatedProjectPath}}/public ./public
+
+EXPOSE 3001
+CMD ["node", "server.js"]
