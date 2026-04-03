@@ -17,8 +17,29 @@ export interface UseTasksResult {
 
 const POLL_INTERVAL_MS = 10_000;
 
+interface BoardIssue {
+  number: number;
+  title: string;
+  assignee: string | null;
+}
+
+interface BoardResponse {
+  columns: Array<{
+    id: string;
+    issues: BoardIssue[];
+  }>;
+}
+
+const BOARD_STATUS_MAP: Record<string, Task['status']> = {
+  backlog: 'todo',
+  ready: 'todo',
+  'in-progress': 'in_progress',
+  'in-review': 'in_progress',
+  done: 'done',
+};
+
 /**
- * Fetches tasks from `/api/tasks`.
+ * Fetches the mounted kanban board from `/api/v4/tasks/board`.
  * Polls every 10s.
  */
 export function useTasks(): UseTasksResult {
@@ -26,15 +47,26 @@ export function useTasks(): UseTasksResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const mountedRef = useRef(true);
+  const hasLoadedRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
     try {
-      if (tasks.length === 0) setLoading(true);
-      const data = await fetchApi<{ tasks: Task[] }>('/api/tasks');
+      if (!hasLoadedRef.current) setLoading(true);
+      const data = await fetchApi<BoardResponse>('/api/v4/tasks/board');
+      const nextTasks = data.columns.flatMap((column) =>
+        column.issues.map((issue) => ({
+          id: String(issue.number),
+          title: issue.title,
+          status: BOARD_STATUS_MAP[column.id] ?? 'todo',
+          assignee: issue.assignee ?? undefined,
+        })),
+      );
+
       if (mountedRef.current) {
-        setTasks(data.tasks ?? []);
+        setTasks(nextTasks);
         setError(null);
+        hasLoadedRef.current = true;
       }
     } catch (err) {
       if (mountedRef.current) {

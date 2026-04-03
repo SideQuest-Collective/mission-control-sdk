@@ -6,7 +6,7 @@ import {
 {{/each}}
 } from '@sidequestteams/mission-control-sdk/widgets';
 import { DynamicWidget } from '@sidequestteams/mission-control-sdk/primitives';
-import { useManifest } from '@sidequestteams/mission-control-sdk/hooks';
+import { useKpis, useManifest } from '@sidequestteams/mission-control-sdk/hooks';
 import { useTheme } from '@sidequestteams/mission-control-sdk/theme';
 
 const TEAM_SPECIFIC_WIDGETS = {{{json teamSpecificWidgets}}};
@@ -27,6 +27,7 @@ const GRID_SPAN_CLASS = {
 
 export default function Dashboard() {
   const { team, loading } = useManifest();
+  const { kpis } = useKpis({ rolePacks: team?.role_packs });
   const { toggle, mode } = useTheme();
 
   if (loading) {
@@ -71,7 +72,7 @@ export default function Dashboard() {
             className={GRID_SPAN_CLASS[descriptor.grid.w as keyof typeof GRID_SPAN_CLASS] ?? 'col-span-12'}
             style=\{{gridRow: `span ${descriptor.grid.h}`}}
           >
-            <DynamicWidget descriptor={descriptor} />
+            <DynamicWidget descriptor={descriptor} kpis={kpis} />
           </div>
         ))}
       </div>

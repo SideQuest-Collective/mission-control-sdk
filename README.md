@@ -84,7 +84,7 @@ The `ThemeProvider` reads `visual_theme` from the runtime manifest and sets CSS 
 ```tsx
 import { ThemeProvider, useTheme } from '@sidequestteams/mission-control-sdk/theme';
 
-<ThemeProvider manifestPath="/api/manifest">
+<ThemeProvider>
   <App />
 </ThemeProvider>
 

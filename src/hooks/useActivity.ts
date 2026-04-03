@@ -6,7 +6,7 @@ export interface ActivityEvent {
   timestamp: string;
   agent_id: string;
   type: string;
-  message: string;
+  summary: string;
 }
 
 export interface UseActivityResult {

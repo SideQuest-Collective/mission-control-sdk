@@ -1,4 +1,5 @@
-import type { TeamSpecificWidgetDescriptor } from '../types.js';
+import { useKpis } from '../hooks/useKpis.js';
+import type { KpiValue, TeamSpecificWidgetDescriptor } from '../types.js';
 import { StatCard } from './StatCard.js';
 import { Sparkline } from './Sparkline.js';
 import { BarChart } from './BarChart.js';
@@ -9,6 +10,7 @@ import { Timeline } from './Timeline.js';
 
 export interface DynamicWidgetProps {
   descriptor: TeamSpecificWidgetDescriptor;
+  kpis?: KpiValue[];
 }
 
 /**
@@ -16,29 +18,66 @@ export interface DynamicWidgetProps {
  * primitive renderer. The `config` object on the descriptor is spread
  * as props to the underlying primitive.
  */
-export function DynamicWidget({ descriptor }: DynamicWidgetProps) {
+function resolveKpi(descriptor: TeamSpecificWidgetDescriptor, kpis: KpiValue[]): KpiValue | null {
+  const sourceSegments = descriptor.data_source.split('.');
+  const sourceId = descriptor.data_source.startsWith('kpi.') && sourceSegments.length >= 3
+    ? sourceSegments.slice(2).join('.')
+    : descriptor.data_source;
+  const descriptorId = descriptor.id.replace(/-/g, '_');
+
+  return kpis.find((kpi) => kpi.id === sourceId || kpi.id === descriptorId) ?? null;
+}
+
+function resolveConfig(descriptor: TeamSpecificWidgetDescriptor, kpis: KpiValue[]) {
+  const kpi = resolveKpi(descriptor, kpis);
+  if (!kpi) {
+    return descriptor.config;
+  }
+
+  const data = Array.isArray(kpi.trend)
+    ? kpi.trend
+    : typeof kpi.value === 'number'
+      ? [kpi.value]
+      : [];
+
+  return {
+    ...descriptor.config,
+    value: descriptor.config.value ?? kpi.value,
+    delta: descriptor.config.delta ?? kpi.delta,
+    data: descriptor.config.data ?? data,
+  };
+}
+
+function DynamicWidgetContent({
+  descriptor,
+  kpis,
+}: {
+  descriptor: TeamSpecificWidgetDescriptor;
+  kpis: KpiValue[];
+}) {
   const { primitive, title, config } = descriptor;
+  const resolvedConfig = resolveConfig(descriptor, kpis);
 
   switch (primitive) {
     case 'stat-card':
       return (
         <StatCard
-          value={(config.value as string | number) ?? '--'}
+          value={(resolvedConfig.value as string | number) ?? '--'}
           label={title}
-          delta={config.delta as number | undefined}
-          unit={config.unit as string | undefined}
+          delta={resolvedConfig.delta as number | undefined}
+          unit={resolvedConfig.unit as string | undefined}
         />
       );
 
     case 'sparkline':
       return (
         <Sparkline
-          value={(config.value as string | number) ?? '--'}
+          value={(resolvedConfig.value as string | number) ?? '--'}
           label={title}
-          data={(config.data as number[]) ?? []}
-          delta={config.delta as number | undefined}
-          unit={config.unit as string | undefined}
-          color={config.color as string | undefined}
+          data={(resolvedConfig.data as number[]) ?? []}
+          delta={resolvedConfig.delta as number | undefined}
+          unit={resolvedConfig.unit as string | undefined}
+          color={resolvedConfig.color as string | undefined}
         />
       );
 
@@ -102,4 +141,17 @@ export function DynamicWidget({ descriptor }: DynamicWidgetProps) {
       );
     }
   }
+}
+
+function DynamicWidgetWithKpiBinding({ descriptor }: { descriptor: TeamSpecificWidgetDescriptor }) {
+  const { kpis } = useKpis();
+  return <DynamicWidgetContent descriptor={descriptor} kpis={kpis} />;
+}
+
+export function DynamicWidget({ descriptor, kpis }: DynamicWidgetProps) {
+  if (kpis) {
+    return <DynamicWidgetContent descriptor={descriptor} kpis={kpis} />;
+  }
+
+  return <DynamicWidgetWithKpiBinding descriptor={descriptor} />;
 }

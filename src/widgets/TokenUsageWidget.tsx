@@ -5,7 +5,7 @@ export function TokenUsageWidget() {
   const { byAgent } = useCosts();
 
   const chartData = byAgent.map((entry, i) => ({
-    label: entry.agent_id,
+    label: entry.agent_name || entry.agent_id,
     value: entry.tokens,
     color: `var(--mc-chart-${(i % 8) + 1})`,
   }));

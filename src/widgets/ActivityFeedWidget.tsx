@@ -23,7 +23,7 @@ export function ActivityFeedWidget() {
   const timelineEvents: TimelineEvent[] = events.map((e) => ({
     id: e.id,
     timestamp: e.timestamp,
-    title: e.message,
+    title: e.summary,
     detail: e.agent_id,
     type: e.type,
   }));
