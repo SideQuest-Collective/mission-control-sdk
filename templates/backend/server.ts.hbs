@@ -1,13 +1,20 @@
 import express from 'express';
 import cors from 'cors';
+import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { WebSocketServer } from 'ws';
 import {
   createAgentsRouter,
   createKpisRouter,
   createTelemetryRouter,
   createThemeRouter,
   createSkynetProxy,
+  createTasksRouter,
+  createActivityRouter,
+  createCostsRouter,
+  createUsageRouter,
+  GitHubClient,
 } from '@sidequestteams/mission-control-sdk/backend';
 import { SkynetClient } from '@sidequestteams/mission-control-sdk/skynet';
 import { KPI_REGISTRY, getKpisForRolePacks } from '@sidequestteams/mission-control-sdk/kpis';
@@ -24,6 +31,13 @@ const skynetClient = new SkynetClient({
   wsUrl: teamBlock?.connectivity?.skynet?.ws_url ?? 'ws://skynet:8080',
   httpUrl: teamBlock?.connectivity?.skynet?.http_url ?? 'http://skynet:8080',
 });
+
+// Initialize GitHub client from environment
+const githubClient = new GitHubClient(
+  process.env.GH_TOKEN ?? '',
+  process.env.GITHUB_OWNER ?? '',
+  process.env.GITHUB_REPO ?? '',
+);
 
 const app = express();
 app.use(cors());
@@ -102,9 +116,80 @@ createThemeRouter({
 })(themeRouter);
 app.use('/api/theme', themeRouter);
 
+// ── Tasks routes (GitHub API) ──────────────────────────────────────────
+const tasksRouter = express.Router();
+createTasksRouter({
+  async getIssues(filters) {
+    return githubClient.getIssues(filters);
+  },
+  async getPullRequests(state) {
+    return githubClient.getPullRequests(state);
+  },
+  async getBoard() {
+    return githubClient.getBoard();
+  },
+  async updateIssue(id, update) {
+    return githubClient.updateIssue(id, update);
+  },
+})(tasksRouter);
+app.use('/api/v4/tasks', tasksRouter);
+
+// ── Activity routes (Skynet proxy) ─────────────────────────────────────
+const activityRouter = express.Router();
+createActivityRouter({
+  async getActivity(limit) {
+    const query = limit ? `?limit=${limit}` : '';
+    return skynetClient.httpGet(`/activity${query}`);
+  },
+})(activityRouter);
+app.use('/api/activity', activityRouter);
+
+// ── Costs routes (Skynet proxy) ────────────────────────────────────────
+const costsRouter = express.Router();
+createCostsRouter({
+  async getSummary(period) {
+    return skynetClient.httpGet(`/costs/summary?period=${period ?? '24h'}`);
+  },
+  async getBreakdown() {
+    return skynetClient.httpGet('/costs/breakdown');
+  },
+})(costsRouter);
+app.use('/api/v4/costs', costsRouter);
+
+// ── Usage routes (Skynet proxy) ────────────────────────────────────────
+const usageRouter = express.Router();
+createUsageRouter({
+  async getUsage(period) {
+    return skynetClient.httpGet(`/usage?period=${period ?? '24h'}`);
+  },
+})(usageRouter);
+app.use('/api/usage', usageRouter);
+
 // ── SSE proxy for Skynet events ────────────────────────────────────────
 app.use('/api/events', createSkynetProxy(skynetClient));
 
-app.listen(PORT, () => {
+// ── Start server with WebSocket support ────────────────────────────────
+const server = createServer(app);
+
+const wss = new WebSocketServer({ server });
+
+// Forward Skynet events to all connected WS clients
+skynetClient.onEvent((event) => {
+  const data = JSON.stringify(event);
+  for (const client of wss.clients) {
+    if (client.readyState === 1) {
+      client.send(data);
+    }
+  }
+});
+
+// Heartbeat — keep WS connections alive
+setInterval(() => {
+  for (const client of wss.clients) {
+    if (client.readyState === 1) client.ping();
+  }
+}, 30000);
+
+server.listen(PORT, () => {
   console.log(`[{{teamSlug}}] Mission Control backend listening on :${PORT}`);
 });
