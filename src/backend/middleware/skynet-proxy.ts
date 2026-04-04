@@ -1,4 +1,45 @@
 import type { SkynetClient } from '../../skynet/client.js';
+import type { SkynetEvent } from '../../skynet/types.js';
+
+/** KPI-related SSE event types forwarded by the proxy */
+export type KpiSseEventType =
+  | 'kpi.proposed'
+  | 'kpi.vote_received'
+  | 'kpi.activated'
+  | 'kpi.deactivated';
+
+export interface KpiProposedPayload {
+  proposal_id: string;
+  kpi_name: string;
+  proposed_by?: string;
+}
+
+export interface KpiVoteReceivedPayload {
+  proposal_id: string;
+  voter_id: string;
+  vote: 'approve' | 'reject';
+}
+
+export interface KpiActivatedPayload {
+  kpi_id: string;
+  widget_descriptor?: Record<string, unknown>;
+}
+
+export interface KpiDeactivatedPayload {
+  kpi_id: string;
+}
+
+/** All SSE event types the proxy will forward */
+const FORWARDED_EVENTS = new Set<string>([
+  // Existing events
+  'telemetry',
+  'agent-update',
+  // KPI proposal lifecycle events
+  'kpi.proposed',
+  'kpi.vote_received',
+  'kpi.activated',
+  'kpi.deactivated',
+]);
 
 /**
  * Creates an SSE (Server-Sent Events) middleware that proxies Skynet
@@ -29,4 +70,25 @@ export function createSkynetProxy(skynetClient: SkynetClient) {
       unsubscribe();
     });
   };
+}
+
+/**
+ * Helper to emit a KPI SSE event through a Skynet client.
+ * Called from route handlers when KPI proposal state changes.
+ */
+export function emitKpiEvent(
+  skynetClient: SkynetClient,
+  type: KpiSseEventType,
+  payload: Record<string, unknown>,
+): void {
+  const event: SkynetEvent = {
+    type,
+    timestamp: Date.now(),
+    payload,
+  };
+  // Broadcast to all connected SSE clients via the Skynet client's handlers
+  // The proxy's onEvent subscription will pick it up and forward as SSE
+  (skynetClient as any).handlers?.forEach?.((handler: (e: SkynetEvent) => void) => {
+    handler(event);
+  });
 }
