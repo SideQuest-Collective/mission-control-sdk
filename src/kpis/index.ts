@@ -9,6 +9,10 @@ export {
   buildKpiBootstrapStatements,
 } from './kpi-runtime-store.js';
 export type { KpiRuntimeStore } from './kpi-runtime-store.js';
+export {
+  STATIC_PIPELINE_MAP,
+  getStaticPipelineDescriptor,
+} from './static-pipelines.js';
 export type {
   PipelineDescriptor,
   PipelineSource,

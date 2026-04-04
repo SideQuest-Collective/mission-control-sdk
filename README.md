@@ -146,6 +146,93 @@ const kpis = getKpisForRolePacks(['development', 'review']);
 // → cycle_time, throughput, blocked_age, tool_backed_runs, verified_completions, review_wait, reopen_rate, intent_only_runs
 ```
 
+## Dynamic KPI System
+
+Beyond the 22 static baseline KPIs, teams can have up to 10 dynamic KPIs generated at compile-time by an LLM or registered at runtime by agents. Both paths produce the same artifact: a `KpiDefinition` paired with a `PipelineDescriptor` that the `KpiProjectionEngine` turns into live values.
+
+### Two paths to dynamic KPIs
+
+**Compile-time (bootstrap):** During `buildMissionControlTeamBlockAsync()`, an LLM reads the team's purpose, roster, and role packs to generate team-specific and per-agent KPIs. These are deduplicated against the static baseline and stored in the team block as `kpi_registry`, `pipelines`, and `kpi_catalog`.
+
+**Runtime (agent-driven):** Agents propose new KPIs via the SDK's HTTP API. Proposals go through a dual-gate approval flow (team quorum + operator approval) before activation.
+
+### Runtime KPI registration
+
+```
+POST /api/kpis/propose
+{
+  "kpi": {
+    "id": "scrape_success_rate",
+    "name": "Scrape Success Rate",
+    "category": "execution",
+    "unit": "percent",
+    "scope": "agent",
+    "agent_id": "scrape-analyst",
+    "description": "Percentage of scrape runs completing without errors"
+  },
+  "pipeline": {
+    "version": 1,
+    "sources": [{ "family": "run.ended", "filter": { "agent_id": "scrape-analyst" } }],
+    "aggregation": {
+      "type": "rate",
+      "numerator": { "type": "count_where", "predicate": { "payload.success": "true" } },
+      "denominator": { "type": "count" }
+    },
+    "window": "24h",
+    "output_unit": "percent"
+  },
+  "reason": "Track scrape reliability after discovering intermittent failures"
+}
+```
+
+### Approval flow
+
+1. Agent submits proposal via `POST /api/kpis/propose`
+2. Team agents are notified via mesh broadcast
+3. Agents vote via `POST /api/kpis/proposals/:id/vote` (majority quorum required)
+4. Operator approves via the Mission Control dashboard
+5. Both gates pass → KPI activated with live pipeline
+
+Proposals expire after 24 hours. Rejection at any gate stops the proposal.
+
+### Capacity and replacement
+
+A team can have at most **10 dynamic KPIs** active at any time. Static baseline KPIs do not count toward this cap. When at capacity, a new proposal must include a `replaces` field nominating an existing dynamic KPI to drop.
+
+```
+GET /api/kpis/capacity → { "active": 7, "max": 10, "remaining": 3 }
+```
+
+### Projection engine
+
+The `KpiProjectionEngine` subscribes to Skynet telemetry events, fans them out to per-KPI projections, and produces `KpiValue` objects with value, delta, trend, and freshness.
+
+```typescript
+import { KpiProjectionEngine } from '@sidequestteams/mission-control-sdk/kpis';
+
+const engine = new KpiProjectionEngine();
+engine.register(kpiDefinition, pipelineDescriptor);
+engine.start(telemetrySubscriber);
+
+// Values are computed on a 30s flush cycle, or on-demand:
+const values = engine.computeAll();
+const single = engine.compute('scrape_success_rate');
+```
+
+### Pipeline descriptor format
+
+```typescript
+interface PipelineDescriptor {
+  version: 1;
+  sources: [{ family: TelemetryFamily; filter?: Record<string, string> }];
+  aggregation: AggregationType;  // count | count_where | avg | sum | p50 | p90 | max | min | rate
+  window: string;                // "1h" | "6h" | "24h" | "7d"
+  output_unit: string;           // "count" | "percent" | "hours" | "ms"
+}
+```
+
+Aggregation types: `count`, `count_where` (with predicate), `avg`/`sum`/`p50`/`p90`/`max`/`min` (with field), and `rate` (numerator/denominator, both aggregations).
+
 ## Scaffold Templates
 
 Handlebars templates at `templates/` are used by the bootstrap compiler to stamp out per-team dashboards:
