@@ -47,6 +47,7 @@ export interface KpiProposal {
     description: string;
   };
   pipeline: PipelineDescriptor;
+  proposed_by?: string;
   replaces?: string;
   reason: string;
 }
@@ -60,6 +61,7 @@ export interface KpiProposalRecord {
     | 'team_voted'
     | 'operator_pending'
     | 'approved'
+    | 'active'
     | 'rejected'
     | 'expired';
   replaces_kpi_id?: string;

@@ -94,6 +94,45 @@ describe('KPI Proposals Router', () => {
       expect(res.body.error).toContain('already active');
     });
 
+    it('rejects replacements that are not active dynamic KPIs', async () => {
+      const store = makeStore({
+        getActive: vi.fn(async (_teamSlug: string, kpiId: string) => (
+          kpiId === 'replacement-kpi' ? null : null
+        )),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+
+      const res = mockRes();
+      await router.routes.post['/propose']({
+        body: { ...validProposalBody, replaces: 'replacement-kpi' },
+      }, res);
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.body.error).toContain('Replacement KPI');
+    });
+
+    it('auto-counts the proposer vote for team-scoped KPIs via proposed_by', async () => {
+      const store = makeStore();
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+
+      const res = mockRes();
+      await router.routes.post['/propose']({
+        body: {
+          ...validProposalBody,
+          kpi: { ...validProposalBody.kpi, scope: 'team', agent_id: undefined },
+          proposed_by: 'agent-9',
+        },
+      }, res);
+
+      expect(store.castVote).toHaveBeenCalledWith(expect.objectContaining({
+        voter_id: 'agent-9',
+        voter_type: 'agent',
+        vote: 'approve',
+      }));
+    });
+
     it('returns 400 for missing fields', async () => {
       const store = makeStore();
       const router = createMockRouter();
@@ -125,8 +164,33 @@ describe('KPI Proposals Router', () => {
         { params: { id: 'prop-1' }, body: { vote: 'approve', voter_id: 'agent-2', voter_type: 'agent' } },
         res,
       );
+      expect(store.expireStaleProposals).toHaveBeenCalledTimes(1);
       expect(store.castVote).toHaveBeenCalledTimes(1);
       expect(res.body.status).toBe('pending');
+    });
+
+    it('blocks votes on expired proposals after expiring stale records', async () => {
+      const expiredProposal: KpiProposalRecord = {
+        ...pendingProposal,
+        status: 'expired',
+      };
+      const store = makeStore({
+        expireStaleProposals: vi.fn(async () => 1),
+        getProposal: vi.fn(async () => expiredProposal),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+
+      const res = mockRes();
+      await router.routes.post['/proposals/:id/vote'](
+        { params: { id: 'prop-1' }, body: { vote: 'approve', voter_id: 'agent-2', voter_type: 'agent' } },
+        res,
+      );
+
+      expect(store.expireStaleProposals).toHaveBeenCalledTimes(1);
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.body.error).toContain('expired');
+      expect(store.castVote).not.toHaveBeenCalled();
     });
 
     it('transitions to rejected on reject vote', async () => {
@@ -207,6 +271,7 @@ describe('KPI Proposals Router', () => {
 
       const res = mockRes();
       await router.routes.get['/capacity']({}, res);
+      expect(store.expireStaleProposals).toHaveBeenCalledTimes(1);
       expect(res.body).toEqual({ active: 7, max: 10, remaining: 3 });
     });
   });

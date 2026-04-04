@@ -148,6 +148,7 @@ describe('Approval State Machine', () => {
         status: 'operator_pending',
       };
       const store = makeStore({
+        getActive: vi.fn(async () => ({ id: 'old-kpi' } as any)),
         countVotes: vi.fn(async () => ({ approve: 3, reject: 0 })),
         listVotes: vi.fn(async () => [
           { proposal_id: 'prop-1', voter_id: 'operator', voter_type: 'operator', vote: 'approve', voted_at: '2026-04-03T02:00:00.000Z' },
@@ -157,6 +158,27 @@ describe('Approval State Machine', () => {
       await evaluateApproval(deps, 'prop-1', proposalWithReplace, 'operator');
       expect(store.deactivate).toHaveBeenCalledWith('team-a', 'old-kpi');
       expect(store.catalogTransition).toHaveBeenCalledWith('team-a', 'old-kpi', 'archived', 'kpi-new');
+    });
+
+    it('rejects activation when the replacement KPI is no longer active', async () => {
+      const proposalWithReplace: KpiProposalRecord = {
+        ...baseProposal,
+        replaces_kpi_id: 'old-kpi',
+        status: 'operator_pending',
+      };
+      const store = makeStore({
+        getActive: vi.fn(async () => null),
+        countVotes: vi.fn(async () => ({ approve: 3, reject: 0 })),
+        listVotes: vi.fn(async () => [
+          { proposal_id: 'prop-1', voter_id: 'operator', voter_type: 'operator', vote: 'approve', voted_at: '2026-04-03T02:00:00.000Z' },
+        ]),
+      });
+
+      await expect(
+        evaluateApproval(makeDeps(store), 'prop-1', proposalWithReplace, 'operator'),
+      ).rejects.toThrow(/no longer active/);
+      expect(store.transitionProposal).toHaveBeenCalledWith('prop-1', 'rejected', expect.any(String));
+      expect(store.activate).not.toHaveBeenCalled();
     });
   });
 

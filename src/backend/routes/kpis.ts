@@ -4,7 +4,7 @@ import type { KpiProjectionEngine } from '../../kpis/projection-engine.js';
 export interface KpisRouterDeps {
   getKpis(rolePacks?: string[]): Promise<KpiValue[]>;
   getKpi(id: string): Promise<KpiValue | null>;
-  getRegistry(): KpiDefinition[];
+  getRegistry(): KpiDefinition[] | Promise<KpiDefinition[]>;
   projectionEngine?: KpiProjectionEngine;
 }
 
@@ -28,7 +28,7 @@ export function createKpisRouter(deps: KpisRouterDeps) {
 
         if (deps.projectionEngine) {
           const computed = deps.projectionEngine.computeAll();
-          const registry = deps.getRegistry();
+          const registry = await deps.getRegistry();
 
           // Filter by role_packs if specified
           let filtered: KpiValue[];
@@ -81,7 +81,7 @@ export function createKpisRouter(deps: KpisRouterDeps) {
         }
 
         // Enrich with definition metadata
-        const definition = deps.getRegistry().find((d) => d.id === kpi!.id);
+        const definition = (await deps.getRegistry()).find((d) => d.id === kpi!.id);
         res.json({ kpi, definition: definition ?? null });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Internal error';

@@ -6,6 +6,7 @@ const STATUS_LABELS: Record<string, string> = {
   team_voted: 'Team Voted',
   operator_pending: 'Awaiting Operator',
   approved: 'Approved',
+  active: 'Active',
   rejected: 'Rejected',
   expired: 'Expired',
 };
@@ -15,6 +16,7 @@ const STATUS_COLORS: Record<string, string> = {
   team_voted: 'var(--mc-chart-3, #3b82f6)',
   operator_pending: 'var(--mc-accent, #a78bfa)',
   approved: 'var(--mc-status-success, #22c55e)',
+  active: 'var(--mc-status-success, #22c55e)',
   rejected: 'var(--mc-status-error, #ef4444)',
   expired: 'var(--mc-text-tertiary, #5c6478)',
 };
@@ -185,7 +187,7 @@ export function KpiProposalWidget() {
   );
 
   const recentlyActivated = proposals.filter((p) => {
-    if (p.status !== 'approved' && p.resolved_at == null) return false;
+    if (p.status !== 'approved' && p.status !== 'active' && p.resolved_at == null) return false;
     const resolved = p.resolved_at ? new Date(p.resolved_at).getTime() : 0;
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     return resolved >= sevenDaysAgo;

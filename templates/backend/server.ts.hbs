@@ -3,6 +3,7 @@ import cors from 'cors';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { Pool } from 'pg';
 import { WebSocketServer } from 'ws';
 import {
   createAgentsRouter,
@@ -21,6 +22,7 @@ import { broadcastKpiProposal } from '@sidequestteams/mission-control-sdk/backen
 import { SkynetClient } from '@sidequestteams/mission-control-sdk/skynet';
 import { KPI_REGISTRY, getKpisForRolePacks } from '@sidequestteams/mission-control-sdk/kpis';
 import { createKpiRuntimeStore, buildKpiBootstrapStatements } from '@sidequestteams/mission-control-sdk/kpis/kpi-runtime-store';
+import type { KpiDefinition, KpiValue } from '@sidequestteams/mission-control-sdk/src/types.js';
 
 const PORT = process.env.MC_PORT ?? 4100;
 const MANIFEST_PATH = process.env.RUNTIME_MANIFEST_PATH ?? resolve('./runtime-manifest.json');
@@ -28,6 +30,20 @@ const MANIFEST_PATH = process.env.RUNTIME_MANIFEST_PATH ?? resolve('./runtime-ma
 // Load runtime manifest team block
 const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8'));
 const teamBlock = manifest.team;
+const STATIC_KPI_IDS = new Set(KPI_REGISTRY.map((kpi) => kpi.id));
+
+const manifestDynamicRegistry: KpiDefinition[] = Array.isArray(teamBlock?.kpi_registry)
+  ? teamBlock.kpi_registry.map((entry: any) => ({
+      id: entry.id,
+      name: entry.name,
+      category: entry.category,
+      unit: entry.unit,
+      description: entry.description,
+      data_source: entry.scope === 'agent'
+        ? `dynamic:${entry.agent_id ?? 'agent'}`
+        : 'dynamic:team',
+    }))
+  : [];
 
 // Initialize Skynet client from manifest connectivity
 const skynetClient = new SkynetClient({
@@ -42,6 +58,65 @@ const githubClient = new GitHubClient(
   process.env.GITHUB_OWNER ?? '',
   process.env.GITHUB_REPO ?? '',
 );
+
+const kpiPool = new Pool({
+  connectionString: process.env.KPI_DB_URL ?? process.env.HARNESS_DB_URL,
+  max: 5,
+  application_name: '{{teamSlug}}-kpi-store',
+});
+const kpiSchema = process.env.KPI_POSTGRES_SCHEMA ?? 'public';
+
+// Bootstrap DDL
+(async () => {
+  await kpiPool.query(`CREATE SCHEMA IF NOT EXISTS ${kpiSchema}`);
+  for (const stmt of buildKpiBootstrapStatements(kpiSchema)) {
+    await kpiPool.query(stmt);
+  }
+})().catch((err) => console.error('[kpi-store] Bootstrap failed:', err));
+
+const kpiStore = createKpiRuntimeStore(kpiPool, kpiSchema);
+
+function mergeKpiDefinitions(...groups: KpiDefinition[][]): KpiDefinition[] {
+  const merged = new Map<string, KpiDefinition>();
+  for (const group of groups) {
+    for (const definition of group) {
+      merged.set(definition.id, definition);
+    }
+  }
+  return [...merged.values()];
+}
+
+function buildMockKpi(definition: KpiDefinition): KpiValue {
+  return {
+    id: definition.id,
+    value: 0,
+    freshness: 'mock',
+    source: 'sdk-default',
+  };
+}
+
+function filterDefinitionsForRolePacks(
+  definitions: KpiDefinition[],
+  rolePacks: string[],
+): KpiDefinition[] {
+  const allowedStaticIds = new Set(getKpisForRolePacks(rolePacks).map((definition) => definition.id));
+  return definitions.filter((definition) => {
+    return allowedStaticIds.has(definition.id) || !STATIC_KPI_IDS.has(definition.id);
+  });
+}
+
+async function getRuntimeKpiDefinitions(): Promise<KpiDefinition[]> {
+  const activeKpis = await kpiStore.listActive('{{teamSlug}}');
+  return activeKpis.map((entry) => entry.kpi_definition);
+}
+
+async function getAllKpiDefinitions(): Promise<KpiDefinition[]> {
+  return mergeKpiDefinitions(
+    KPI_REGISTRY,
+    manifestDynamicRegistry,
+    await getRuntimeKpiDefinitions(),
+  );
+}
 
 const app = express();
 app.use(cors());
@@ -80,21 +155,16 @@ const kpisRouter = express.Router();
 createKpisRouter({
   async getKpis(rolePacks) {
     const packs = rolePacks ?? teamBlock?.role_packs ?? [];
-    const definitions = getKpisForRolePacks(packs);
-    return definitions.map((d) => ({
-      id: d.id,
-      value: 0,
-      freshness: 'mock' as const,
-      source: 'sdk-default',
-    }));
+    const definitions = filterDefinitionsForRolePacks(await getAllKpiDefinitions(), packs);
+    return definitions.map(buildMockKpi);
   },
   async getKpi(id: string) {
-    const definition = KPI_REGISTRY.find((d) => d.id === id);
+    const definition = (await getAllKpiDefinitions()).find((d) => d.id === id);
     if (!definition) return null;
-    return { id, value: 0, freshness: 'mock' as const, source: 'sdk-default' };
+    return buildMockKpi(definition);
   },
-  getRegistry() {
-    return KPI_REGISTRY;
+  async getRegistry() {
+    return getAllKpiDefinitions();
   },
 })(kpisRouter);
 app.use('/api/productivity/kpis', kpisRouter);
@@ -170,25 +240,6 @@ createUsageRouter({
 app.use('/api/usage', usageRouter);
 
 // ── KPI Proposals routes (runtime registration) ──────────────────────────
-{{#if kpiStoreEnabled}}
-import { Pool } from 'pg';
-
-const kpiPool = new Pool({
-  connectionString: process.env.KPI_DB_URL ?? process.env.HARNESS_DB_URL,
-  max: 5,
-  application_name: '{{teamSlug}}-kpi-store',
-});
-const kpiSchema = process.env.KPI_POSTGRES_SCHEMA ?? 'public';
-
-// Bootstrap DDL
-(async () => {
-  await kpiPool.query(`CREATE SCHEMA IF NOT EXISTS ${kpiSchema}`);
-  for (const stmt of buildKpiBootstrapStatements(kpiSchema)) {
-    await kpiPool.query(stmt);
-  }
-})().catch((err) => console.error('[kpi-store] Bootstrap failed:', err));
-
-const kpiStore = createKpiRuntimeStore(kpiPool, kpiSchema);
 const kpiProposalsRouter = express.Router();
 const skynetHttpUrl = teamBlock?.connectivity?.skynet?.http_url ?? 'http://skynet:8080';
 const gatewayToken = process.env.SKYNET_OPS_TOKEN ?? process.env.OPENCLAW_GATEWAY_TOKEN ?? '';
@@ -211,7 +262,6 @@ createKpiProposalsRouter({
   },
 })(kpiProposalsRouter);
 app.use('/api/kpis', kpiProposalsRouter);
-{{/if}}
 
 // ── SSE proxy for Skynet events ────────────────────────────────────────
 app.use('/api/events', createSkynetProxy(skynetClient));

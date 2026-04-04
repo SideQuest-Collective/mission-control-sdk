@@ -15,6 +15,17 @@ export interface UseKpisResult {
 }
 
 const POLL_INTERVAL_MS = 60_000;
+const STATIC_KPI_IDS = new Set(KPI_REGISTRY.map((kpi) => kpi.id));
+
+export function filterKpisForRolePacks(kpis: KpiValue[], rolePacks?: string[]): KpiValue[] {
+  if (!rolePacks || rolePacks.length === 0) {
+    return kpis;
+  }
+
+  const allowedDefs = getKpisForRolePacks(rolePacks);
+  const allowedIds = new Set(allowedDefs.map((definition) => definition.id));
+  return kpis.filter((kpi) => allowedIds.has(kpi.id) || !STATIC_KPI_IDS.has(kpi.id));
+}
 
 /**
  * Fetches KPI values from `/api/productivity/kpis`.
@@ -36,11 +47,7 @@ export function useKpis(options: UseKpisOptions = {}): UseKpisResult {
         let filtered = data.kpis ?? [];
 
         // Filter by role packs if provided
-        if (rolePacks && rolePacks.length > 0) {
-          const allowedDefs = getKpisForRolePacks(rolePacks);
-          const allowedIds = new Set(allowedDefs.map((d) => d.id));
-          filtered = filtered.filter((k) => allowedIds.has(k.id));
-        }
+        filtered = filterKpisForRolePacks(filtered, rolePacks);
 
         setKpis(filtered);
         setError(null);
