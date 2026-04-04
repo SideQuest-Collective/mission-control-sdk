@@ -4,6 +4,7 @@ import {
 {{#each defaultWidgets}}
   {{component}},
 {{/each}}
+  KpiProposalWidget,
 } from '@sidequestteams/mission-control-sdk/widgets';
 import { DynamicWidget } from '@sidequestteams/mission-control-sdk/primitives';
 import { useKpis, useManifest } from '@sidequestteams/mission-control-sdk/hooks';
@@ -64,6 +65,11 @@ export default function Dashboard() {
           <{{component}} />
         </div>
 {{/each}}
+
+        {/* KPI Proposals — operator approval widget */}
+        <div className="col-span-4" style=\{{gridRow: 'span 2'}}>
+          <KpiProposalWidget />
+        </div>
 
         {/* Team-specific widgets — driven by role packs, rendered via DynamicWidget */}
         {TEAM_SPECIFIC_WIDGETS.map((descriptor) => (
