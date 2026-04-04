@@ -11,4 +11,7 @@ export { createCostsRouter } from './routes/costs.js';
 export type { CostsRouterDeps, CostSummary, CostBreakdown } from './routes/costs.js';
 export { createUsageRouter } from './routes/usage.js';
 export type { UsageRouterDeps, UsageMetrics } from './routes/usage.js';
+export { createKpiProposalsRouter } from './routes/kpi-proposals.js';
+export type { KpiProposalsRouterDeps } from './routes/kpi-proposals.js';
+export { broadcastKpiProposal } from './handlers/kpi-mesh-notifier.js';
 export { GitHubClient } from './services/github-client.js';

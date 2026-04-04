@@ -7,6 +7,7 @@ import { WebSocketServer } from 'ws';
 import {
   createAgentsRouter,
   createKpisRouter,
+  createKpiProposalsRouter,
   createTelemetryRouter,
   createThemeRouter,
   createSkynetProxy,
@@ -16,8 +17,10 @@ import {
   createUsageRouter,
   GitHubClient,
 } from '@sidequestteams/mission-control-sdk/backend';
+import { broadcastKpiProposal } from '@sidequestteams/mission-control-sdk/backend/handlers/kpi-mesh-notifier';
 import { SkynetClient } from '@sidequestteams/mission-control-sdk/skynet';
 import { KPI_REGISTRY, getKpisForRolePacks } from '@sidequestteams/mission-control-sdk/kpis';
+import { createKpiRuntimeStore, buildKpiBootstrapStatements } from '@sidequestteams/mission-control-sdk/kpis/kpi-runtime-store';
 
 const PORT = process.env.MC_PORT ?? 4100;
 const MANIFEST_PATH = process.env.RUNTIME_MANIFEST_PATH ?? resolve('./runtime-manifest.json');
@@ -165,6 +168,50 @@ createUsageRouter({
   },
 })(usageRouter);
 app.use('/api/usage', usageRouter);
+
+// ── KPI Proposals routes (runtime registration) ──────────────────────────
+{{#if kpiStoreEnabled}}
+import { Pool } from 'pg';
+
+const kpiPool = new Pool({
+  connectionString: process.env.KPI_DB_URL ?? process.env.HARNESS_DB_URL,
+  max: 5,
+  application_name: '{{teamSlug}}-kpi-store',
+});
+const kpiSchema = process.env.KPI_POSTGRES_SCHEMA ?? 'public';
+
+// Bootstrap DDL
+(async () => {
+  await kpiPool.query(`CREATE SCHEMA IF NOT EXISTS ${kpiSchema}`);
+  for (const stmt of buildKpiBootstrapStatements(kpiSchema)) {
+    await kpiPool.query(stmt);
+  }
+})().catch((err) => console.error('[kpi-store] Bootstrap failed:', err));
+
+const kpiStore = createKpiRuntimeStore(kpiPool, kpiSchema);
+const kpiProposalsRouter = express.Router();
+const skynetHttpUrl = teamBlock?.connectivity?.skynet?.http_url ?? 'http://skynet:8080';
+const gatewayToken = process.env.SKYNET_OPS_TOKEN ?? process.env.OPENCLAW_GATEWAY_TOKEN ?? '';
+
+createKpiProposalsRouter({
+  store: kpiStore,
+  teamSlug: '{{teamSlug}}',
+  rosterSize: teamBlock?.roster?.length ?? 3,
+  onProposed(proposal) {
+    broadcastKpiProposal(proposal, skynetHttpUrl, gatewayToken).catch((err) =>
+      console.error('[kpi-mesh] Broadcast failed:', err),
+    );
+  },
+  onActivated(kpi) {
+    // Push to all WS clients
+    const data = JSON.stringify({ type: 'kpi.activated', payload: { kpi_id: kpi.id, widget_descriptor: kpi.widget_descriptor } });
+    for (const client of wss.clients) {
+      if (client.readyState === 1) client.send(data);
+    }
+  },
+})(kpiProposalsRouter);
+app.use('/api/kpis', kpiProposalsRouter);
+{{/if}}
 
 // ── SSE proxy for Skynet events ────────────────────────────────────────
 app.use('/api/events', createSkynetProxy(skynetClient));
