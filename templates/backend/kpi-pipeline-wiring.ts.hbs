@@ -1,0 +1,40 @@
+/**
+ * KPI Pipeline Wiring — generated from kpi-pipeline-wiring.ts.hbs
+ *
+ * Instantiates the KpiProjectionEngine, loads active KPIs from the store,
+ * and registers each KPI's pipeline with the engine.
+ */
+import { KpiProjectionEngine } from '@sidequestteams/mission-control-sdk/kpis';
+import type { KpiRuntimeStore } from '@sidequestteams/mission-control-sdk/kpis/kpi-runtime-store';
+import type { SkynetClient } from '@sidequestteams/mission-control-sdk/skynet';
+
+export async function initKpiPipelineEngine(
+  store: KpiRuntimeStore,
+  skynetClient: SkynetClient,
+  teamSlug: string,
+): Promise<KpiProjectionEngine> {
+  const engine = new KpiProjectionEngine();
+
+  // Load all active KPIs from the store and register their pipelines
+  const activeKpis = await store.listActive(teamSlug);
+  for (const kpi of activeKpis) {
+    engine.register(kpi.kpi_definition, kpi.pipeline);
+  }
+
+  // Start the engine — subscribes to telemetry events via Skynet
+  engine.start({
+    subscribe(family, handler) {
+      skynetClient.onEvent((event) => {
+        if (event.type === family) {
+          handler(event);
+        }
+      });
+    },
+  });
+
+  console.log(
+    `[{{teamSlug}}] KPI projection engine started with ${activeKpis.length} active pipeline(s)`,
+  );
+
+  return engine;
+}

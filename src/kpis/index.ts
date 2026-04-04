@@ -4,6 +4,11 @@ export { SlidingWindow, parseDuration } from './sliding-window.js';
 export { aggregate } from './aggregators.js';
 export { KpiProjection } from './projection.js';
 export { KpiProjectionEngine } from './projection-engine.js';
+export {
+  createKpiRuntimeStore,
+  buildKpiBootstrapStatements,
+} from './kpi-runtime-store.js';
+export type { KpiRuntimeStore } from './kpi-runtime-store.js';
 export type {
   PipelineDescriptor,
   PipelineSource,
