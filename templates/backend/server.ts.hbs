@@ -89,11 +89,28 @@ const githubClient = new GitHubClient(
   process.env.GITHUB_REPO ?? '',
 );
 
-const kpiPool = new Pool({
-  connectionString: process.env.KPI_DB_URL ?? process.env.HARNESS_DB_URL,
-  max: 5,
-  application_name: '{{teamSlug}}-kpi-store',
-});
+function resolveKpiPoolConfig(): ConstructorParameters<typeof Pool>[0] {
+  const connectionString = process.env.KPI_DB_URL?.trim() || process.env.HARNESS_DB_URL?.trim();
+  if (connectionString) {
+    return {
+      connectionString,
+      max: 5,
+      application_name: '{{teamSlug}}-kpi-store',
+    };
+  }
+
+  return {
+    host: process.env.PGHOST ?? 'skynet-postgres',
+    port: Number(process.env.PGPORT ?? 5432),
+    user: process.env.HARNESS_DB_USER ?? process.env.PGUSER ?? 'harness',
+    password: process.env.HARNESS_DB_PASSWORD ?? process.env.PGPASSWORD ?? 'harness',
+    database: process.env.HARNESS_DB_NAME ?? process.env.PGDATABASE ?? 'harness',
+    max: 5,
+    application_name: '{{teamSlug}}-kpi-store',
+  };
+}
+
+const kpiPool = new Pool(resolveKpiPoolConfig());
 const kpiSchema = process.env.KPI_POSTGRES_SCHEMA ?? 'public';
 
 const kpiStore = createKpiRuntimeStore(kpiPool, kpiSchema);
