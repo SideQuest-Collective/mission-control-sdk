@@ -101,8 +101,6 @@ describe('useKpiProposals — API contract', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         vote: 'approve',
-        voter_id: 'operator',
-        voter_type: 'operator',
       }),
     });
 
@@ -124,8 +122,6 @@ describe('useKpiProposals — API contract', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         vote: 'reject',
-        voter_id: 'operator',
-        voter_type: 'operator',
       }),
     });
 
@@ -146,7 +142,7 @@ describe('useKpiProposals — API contract', () => {
     await fetchApi(`/api/kpis/proposals/${encodedId}/vote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ vote: 'approve', voter_id: 'operator', voter_type: 'operator' }),
+      body: JSON.stringify({ vote: 'approve' }),
     });
 
     expect(mockFetchApi).toHaveBeenCalledWith(

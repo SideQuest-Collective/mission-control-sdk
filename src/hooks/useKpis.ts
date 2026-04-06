@@ -38,6 +38,7 @@ export function useKpis(options: UseKpisOptions = {}): UseKpisResult {
   const [error, setError] = useState<Error | null>(null);
   const mountedRef = useRef(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -74,6 +75,39 @@ export function useKpis(options: UseKpisOptions = {}): UseKpisResult {
     return () => {
       mountedRef.current = false;
       if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [load]);
+
+  useEffect(() => {
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data as string) as { type?: string };
+          if (msg.type === 'kpi.activated' || msg.type === 'kpi.deactivated') {
+            void load();
+          }
+        } catch {
+          // Ignore non-JSON messages
+        }
+      };
+
+      ws.onerror = () => {
+        // WebSocket errors are non-fatal; polling continues
+      };
+    } catch {
+      // WebSocket unavailable; polling provides fallback
+    }
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
   }, [load]);
 

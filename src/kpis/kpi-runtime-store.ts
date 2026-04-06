@@ -20,6 +20,7 @@ export interface KpiRuntimeStore {
   createProposal(record: KpiProposalRecord): Promise<void>;
   getProposal(proposalId: string): Promise<KpiProposalRecord | null>;
   listProposals(teamSlug: string, status?: string): Promise<KpiProposalRecord[]>;
+  setProposalReplacement(proposalId: string, replacesKpiId: string): Promise<void>;
   transitionProposal(proposalId: string, status: string, resolvedAt?: string): Promise<void>;
   expireStaleProposals(): Promise<number>;
 
@@ -215,6 +216,13 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
     return result.rows.map(rowToProposal);
   };
 
+  const setProposalReplacement = async (proposalId: string, replacesKpiId: string): Promise<void> => {
+    await pool.query(
+      `UPDATE ${schema}.kpi_proposals SET replaces_kpi_id = $2 WHERE id = $1`,
+      [proposalId, replacesKpiId],
+    );
+  };
+
   const transitionProposal = async (proposalId: string, status: string, resolvedAt?: string): Promise<void> => {
     if (resolvedAt) {
       await pool.query(
@@ -231,8 +239,52 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
 
   const expireStaleProposals = async (): Promise<number> => {
     const result = await pool.query(
-      `UPDATE ${schema}.kpi_proposals SET status = 'expired', resolved_at = NOW() WHERE status IN ('pending', 'team_voted', 'operator_pending') AND expires_at < NOW()`,
+      [
+        `UPDATE ${schema}.kpi_proposals`,
+        `SET status = 'expired', resolved_at = NOW()`,
+        `WHERE status IN ('pending', 'team_voted', 'operator_pending') AND expires_at < NOW()`,
+        `RETURNING team_slug, proposal, created_at, resolved_at`,
+      ].join(' '),
     );
+
+    for (const row of result.rows) {
+      const proposal = row.proposal as KpiProposalRecord['proposal'];
+      const proposedAt = toISOString(row.created_at);
+      const resolvedAt = toISOString(row.resolved_at);
+      const proposedBy = proposal.proposed_by ?? proposal.kpi.agent_id;
+
+      await pool.query(
+        [
+          `INSERT INTO ${schema}.kpi_catalog (id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status, updated_at)`,
+          `VALUES ($1, $2, $3::jsonb, $4::jsonb, 'runtime_agent', $5, $6, $7, 0, NULL, 'rejected', NOW())`,
+          `ON CONFLICT (team_slug, id)`,
+          `DO UPDATE SET`,
+          `kpi_definition = EXCLUDED.kpi_definition,`,
+          `pipeline = EXCLUDED.pipeline,`,
+          `origin = EXCLUDED.origin,`,
+          `proposed_by = EXCLUDED.proposed_by,`,
+          `status = 'rejected',`,
+          `updated_at = NOW()`,
+        ].join(' '),
+        [
+          proposal.kpi.id,
+          row.team_slug,
+          JSON.stringify({
+            id: proposal.kpi.id,
+            name: proposal.kpi.name,
+            category: proposal.kpi.category,
+            unit: proposal.kpi.unit,
+            description: proposal.kpi.description,
+            data_source: proposal.pipeline.sources[0]?.family ?? 'unknown',
+          }),
+          JSON.stringify(proposal.pipeline),
+          proposedBy ?? null,
+          proposedAt,
+          resolvedAt,
+        ],
+      );
+    }
+
     return result.rowCount ?? 0;
   };
 
@@ -365,6 +417,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
     createProposal,
     getProposal,
     listProposals,
+    setProposalReplacement,
     transitionProposal,
     expireStaleProposals,
     castVote,

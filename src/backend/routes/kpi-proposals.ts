@@ -17,8 +17,11 @@ export interface KpiProposalsRouterDeps {
   store: KpiRuntimeStore;
   teamSlug: string;
   rosterSize: number;
+  resolveActor?: (req: any) => { id: string; type: 'agent' | 'operator' } | null;
   onActivated?: (kpi: ActiveKpi) => void;
   onProposed?: (proposal: KpiProposalRecord) => void;
+  onVoteReceived?: (vote: { proposal_id: string; voter_id: string; vote: 'approve' | 'reject' }) => void;
+  onDeactivated?: (kpiId: string) => void;
 }
 
 /**
@@ -32,8 +35,18 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
       await deps.store.expireStaleProposals();
     };
 
-    const getProposerId = (proposal: KpiProposal): string | null => {
-      return proposal.proposed_by?.trim() || proposal.kpi.agent_id?.trim() || null;
+    const requireActor = (
+      req: any,
+      expectedType?: 'agent' | 'operator',
+    ): { id: string; type: 'agent' | 'operator' } => {
+      const actor = deps.resolveActor?.(req) ?? null;
+      if (!actor) {
+        throw new RouteError('Missing or invalid authorization for KPI action', 401);
+      }
+      if (expectedType && actor.type !== expectedType) {
+        throw new RouteError(`This action requires ${expectedType} authorization`, 403);
+      }
+      return actor;
     };
 
     const requireValidReplacement = async (kpiId: string): Promise<ActiveKpi> => {
@@ -47,29 +60,36 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
     // POST /propose — Agent submits a KPI proposal
     router.post('/propose', async (req: any, res: any) => {
       try {
+        const actor = requireActor(req, 'agent');
         const body = req.body as KpiProposal | undefined;
         if (!body?.kpi?.id || !body?.kpi?.name || !body?.pipeline || !body?.reason) {
           res.status(400).json({ error: 'Missing required fields: kpi.id, kpi.name, pipeline, reason' });
           return;
         }
+        if (body.kpi.scope === 'agent' && body.kpi.agent_id && body.kpi.agent_id !== actor.id) {
+          res.status(403).json({ error: 'Agents may only register agent-scoped KPIs for themselves' });
+          return;
+        }
 
-        if (body.replaces) {
-          await requireValidReplacement(body.replaces);
+        const normalizedProposal: KpiProposal = {
+          ...body,
+          proposed_by: actor.id,
+          kpi: {
+            ...body.kpi,
+            ...(body.kpi.scope === 'agent' ? { agent_id: actor.id } : {}),
+          },
+        };
+
+        if (normalizedProposal.replaces) {
+          await requireValidReplacement(normalizedProposal.replaces);
         }
 
         // Check capacity
         const activeCount = await deps.store.countActive(deps.teamSlug);
-        if (activeCount >= MAX_DYNAMIC_KPIS && !body.replaces) {
-          res.status(409).json({
-            error: `At capacity (${activeCount}/${MAX_DYNAMIC_KPIS}). Must nominate a KPI to replace via "replaces" field.`,
-          });
-          return;
-        }
-
         // Check for duplicate active KPI ID
-        const existing = await deps.store.getActive(deps.teamSlug, body.kpi.id);
+        const existing = await deps.store.getActive(deps.teamSlug, normalizedProposal.kpi.id);
         if (existing) {
-          res.status(409).json({ error: `KPI "${body.kpi.id}" is already active` });
+          res.status(409).json({ error: `KPI "${normalizedProposal.kpi.id}" is already active` });
           return;
         }
 
@@ -78,9 +98,9 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
         const record: KpiProposalRecord = {
           id: proposalId,
           team_slug: deps.teamSlug,
-          proposal: body,
+          proposal: normalizedProposal,
           status: 'pending',
-          replaces_kpi_id: body.replaces,
+          replaces_kpi_id: normalizedProposal.replaces,
           created_at: now.toISOString(),
           expires_at: new Date(now.getTime() + PROPOSAL_TTL_MS).toISOString(),
         };
@@ -88,17 +108,14 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
         await deps.store.createProposal(record);
 
         // Auto-approve from the proposing agent, including team-scoped proposals.
-        const proposerId = getProposerId(body);
-        if (proposerId) {
-          await deps.store.castVote({
-            proposal_id: proposalId,
-            voter_id: proposerId,
-            voter_type: 'agent',
-            vote: 'approve',
-            reason: 'Auto-approve by proposer',
-            voted_at: now.toISOString(),
-          });
-        }
+        await deps.store.castVote({
+          proposal_id: proposalId,
+          voter_id: actor.id,
+          voter_type: 'agent',
+          vote: 'approve',
+          reason: 'Auto-approve by proposer',
+          voted_at: now.toISOString(),
+        });
 
         deps.onProposed?.(record);
 
@@ -142,13 +159,26 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
       }
     });
 
+    // GET /active — List active dynamic KPIs
+    router.get('/active', async (_req: any, res: any) => {
+      try {
+        const active = await deps.store.listActive(deps.teamSlug);
+        res.json({ active });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Internal error';
+        const status = err instanceof RouteError ? err.status : 500;
+        res.status(status).json({ error: message });
+      }
+    });
+
     // POST /proposals/:id/vote — Agent or operator votes
     router.post('/proposals/:id/vote', async (req: any, res: any) => {
       try {
         await expireStale();
-        const { vote, voter_id, voter_type, reason } = req.body ?? {};
-        if (!vote || !voter_id) {
-          res.status(400).json({ error: 'Missing required fields: vote, voter_id' });
+        const actor = requireActor(req);
+        const { vote, reason, replaces } = req.body ?? {};
+        if (!vote) {
+          res.status(400).json({ error: 'Missing required field: vote' });
           return;
         }
         if (vote !== 'approve' && vote !== 'reject') {
@@ -169,17 +199,35 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
           return;
         }
 
-        const vType = voter_type === 'operator' ? 'operator' : 'agent';
+        if (actor.type === 'operator' && typeof replaces === 'string' && replaces.trim() !== '') {
+          await requireValidReplacement(replaces);
+          await deps.store.setProposalReplacement(req.params.id, replaces);
+          proposal.replaces_kpi_id = replaces;
+        }
+        if (actor.type === 'operator' && vote === 'approve') {
+          const activeCount = await deps.store.countActive(deps.teamSlug);
+          if (activeCount >= MAX_DYNAMIC_KPIS && !proposal.replaces_kpi_id) {
+            res.status(409).json({
+              error: `At capacity (${activeCount}/${MAX_DYNAMIC_KPIS}). Select a KPI to replace before approving.`,
+            });
+            return;
+          }
+        }
         const now = new Date().toISOString();
 
         // Record the vote
         await deps.store.castVote({
           proposal_id: req.params.id,
-          voter_id,
-          voter_type: vType,
+          voter_id: actor.id,
+          voter_type: actor.type,
           vote,
           reason,
           voted_at: now,
+        });
+        deps.onVoteReceived?.({
+          proposal_id: req.params.id,
+          voter_id: actor.id,
+          vote,
         });
 
         // Handle rejection from any gate
@@ -190,7 +238,7 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
         }
 
         // Check state transitions for approvals
-        const newStatus = await evaluateApproval(deps, req.params.id, proposal, vType);
+        const newStatus = await evaluateApproval(deps, req.params.id, proposal, actor.type);
         res.json({ proposal_id: req.params.id, status: newStatus });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Internal error';
@@ -210,6 +258,7 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
         await deps.store.deactivate(deps.teamSlug, req.params.id);
         // Archive in catalog
         await deps.store.catalogTransition(deps.teamSlug, req.params.id, 'archived');
+        deps.onDeactivated?.(req.params.id);
         res.json({ ok: true, deactivated: req.params.id });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Internal error';
@@ -310,13 +359,13 @@ async function activateFromProposal(
     },
     pipeline: proposal.proposal.pipeline,
     widget_descriptor: {
-      id: `widget-${kpi.id}`,
+      id: kpi.id.replace(/_/g, '-'),
       title: kpi.name,
-      primitive: kpi.scope === 'agent' ? 'stat-card' : 'sparkline',
-      data_source: kpi.id,
-      derived_from: kpi.id,
-      config: { scope: kpi.scope, agent_id: kpi.agent_id },
-      grid: { w: 1, h: 1 },
+      primitive: kpi.category === 'flow' || kpi.category === 'capacity' ? 'sparkline' : 'stat-card',
+      data_source: `kpi.${kpi.category}.${kpi.id}`,
+      derived_from: 'runtime-agent',
+      config: { scope: kpi.scope, agent_id: kpi.agent_id, unit: kpi.unit, trend_window: proposal.proposal.pipeline.window },
+      grid: { w: 3, h: 3 },
     },
     origin: 'runtime_agent',
     proposed_by: proposedBy,

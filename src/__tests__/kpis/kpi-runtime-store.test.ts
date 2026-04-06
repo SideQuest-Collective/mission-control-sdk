@@ -170,6 +170,38 @@ describe('KpiRuntimeStore', () => {
     });
   });
 
+  describe('setProposalReplacement', () => {
+    it('updates replaces_kpi_id for an existing proposal', async () => {
+      const queryFn = vi.fn(() => qr());
+      const pool = makePool(queryFn);
+      const store = createKpiRuntimeStore(pool, SCHEMA);
+      await store.setProposalReplacement('prop-1', 'kpi-old');
+      expect(queryFn.mock.calls[0][0]).toContain('replaces_kpi_id');
+      expect(queryFn.mock.calls[0][1]).toEqual(['prop-1', 'kpi-old']);
+    });
+  });
+
+  describe('expireStaleProposals', () => {
+    it('archives expired proposals into the catalog as rejected', async () => {
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce(
+          qr([{
+            team_slug: 'team-a',
+            proposal: makeProposal().proposal,
+            created_at: '2026-04-03T00:00:00.000Z',
+            resolved_at: '2026-04-04T00:00:00.000Z',
+          }], 1),
+        )
+        .mockResolvedValueOnce(qr());
+      const pool = makePool(queryFn);
+      const store = createKpiRuntimeStore(pool, SCHEMA);
+      expect(await store.expireStaleProposals()).toBe(1);
+      expect(queryFn.mock.calls[1][0]).toContain('INSERT INTO');
+      expect(queryFn.mock.calls[1][0]).toContain('kpi_catalog');
+    });
+  });
+
   describe('castVote', () => {
     it('upserts vote with ON CONFLICT', async () => {
       const queryFn = vi.fn(() => qr());

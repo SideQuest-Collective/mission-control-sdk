@@ -2,7 +2,7 @@ export { createAgentsRouter } from './routes/agents.js';
 export { createKpisRouter } from './routes/kpis.js';
 export { createTelemetryRouter } from './routes/telemetry.js';
 export { createThemeRouter } from './routes/theme.js';
-export { createSkynetProxy } from './middleware/skynet-proxy.js';
+export { createSkynetProxy, emitKpiEvent } from './middleware/skynet-proxy.js';
 export { createTasksRouter } from './routes/tasks.js';
 export type { TasksRouterDeps, GithubIssue, GithubPR, KanbanBoard } from './routes/tasks.js';
 export { createActivityRouter } from './routes/activity.js';

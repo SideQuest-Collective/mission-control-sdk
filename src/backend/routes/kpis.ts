@@ -1,5 +1,6 @@
 import type { KpiValue, KpiDefinition } from '../../types.js';
 import type { KpiProjectionEngine } from '../../kpis/projection-engine.js';
+import { KPI_REGISTRY } from '../../kpis/registry.js';
 
 export interface KpisRouterDeps {
   getKpis(rolePacks?: string[]): Promise<KpiValue[]>;
@@ -17,6 +18,8 @@ export interface KpisRouterDeps {
  * callbacks when no engine is available.
  */
 export function createKpisRouter(deps: KpisRouterDeps) {
+  const staticKpiIds = new Set(KPI_REGISTRY.map((kpi) => kpi.id));
+
   return function mount(router: { get: Function }): void {
     // GET / — list KPIs, optionally filtered by role_packs
     router.get('/', async (req: any, res: any) => {
@@ -29,13 +32,16 @@ export function createKpisRouter(deps: KpisRouterDeps) {
         if (deps.projectionEngine) {
           const computed = deps.projectionEngine.computeAll();
           const registry = await deps.getRegistry();
+          let allowedIds: Set<string> | null = null;
 
           // Filter by role_packs if specified
           let filtered: KpiValue[];
           if (rolePacks && rolePacks.length > 0) {
             const { getKpisForRolePacks } = await import('../../kpis/role-pack-map.js');
-            const allowedIds = new Set(getKpisForRolePacks(rolePacks).map((k) => k.id));
-            filtered = [...computed.values()].filter((v) => allowedIds.has(v.id));
+            allowedIds = new Set(getKpisForRolePacks(rolePacks).map((k) => k.id));
+            filtered = [...computed.values()].filter((v) => {
+              return allowedIds!.has(v.id) || !staticKpiIds.has(v.id);
+            });
           } else {
             filtered = [...computed.values()];
           }
@@ -43,6 +49,9 @@ export function createKpisRouter(deps: KpisRouterDeps) {
           // Ensure every registered KPI has an entry (mock for those without projections)
           const resultMap = new Map(filtered.map((v) => [v.id, v]));
           for (const def of registry) {
+            if (allowedIds && staticKpiIds.has(def.id) && !allowedIds.has(def.id)) {
+              continue;
+            }
             if (!resultMap.has(def.id)) {
               resultMap.set(def.id, {
                 id: def.id,

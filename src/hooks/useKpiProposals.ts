@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { KpiProposalRecord, KpiProposalVote } from '../kpis/types.js';
+import type { ActiveKpi, KpiProposalRecord, KpiProposalVote } from '../kpis/types.js';
 import { fetchApi } from './api-client.js';
 
 export interface KpiCapacity {
@@ -15,14 +15,31 @@ export interface UseKpiProposalsOptions {
 
 export interface UseKpiProposalsResult {
   proposals: KpiProposalRecord[];
+  proposalDetails: Record<string, { proposal: KpiProposalRecord; votes: KpiProposalVote[] }>;
+  activeKpis: ActiveKpi[];
   capacity: KpiCapacity | null;
   loading: boolean;
   error: Error | null;
-  vote: (proposalId: string, vote: 'approve' | 'reject') => Promise<void>;
+  vote: (
+    proposalId: string,
+    vote: 'approve' | 'reject',
+    options?: { replaces?: string },
+  ) => Promise<void>;
   refresh: () => void;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
+
+function getOperatorAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const configuredToken = typeof process !== 'undefined'
+    ? process.env.NEXT_PUBLIC_MC_OPERATOR_TOKEN
+    : undefined;
+  if (configuredToken) {
+    headers.Authorization = `Bearer ${configuredToken}`;
+  }
+  return headers;
+}
 
 /**
  * Fetches KPI proposals and capacity from the REST API.
@@ -36,6 +53,8 @@ export function useKpiProposals(
   const pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL_MS;
 
   const [proposals, setProposals] = useState<KpiProposalRecord[]>([]);
+  const [proposalDetails, setProposalDetails] = useState<Record<string, { proposal: KpiProposalRecord; votes: KpiProposalVote[] }>>({});
+  const [activeKpis, setActiveKpis] = useState<ActiveKpi[]>([]);
   const [capacity, setCapacity] = useState<KpiCapacity | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -47,13 +66,25 @@ export function useKpiProposals(
     try {
       if (proposals.length === 0 && capacity === null) setLoading(true);
 
-      const [proposalsData, capacityData] = await Promise.all([
+      const [proposalsData, capacityData, activeData] = await Promise.all([
         fetchApi<{ proposals: KpiProposalRecord[] }>('/api/kpis/proposals'),
         fetchApi<KpiCapacity>('/api/kpis/capacity'),
+        fetchApi<{ active: ActiveKpi[] }>('/api/kpis/active'),
       ]);
+      const proposalList = proposalsData.proposals ?? [];
+      const detailsEntries = await Promise.all(
+        proposalList.map(async (proposal) => {
+          const detail = await fetchApi<{ proposal: KpiProposalRecord; votes: KpiProposalVote[] }>(
+            `/api/kpis/proposals/${encodeURIComponent(proposal.id)}`,
+          );
+          return [proposal.id, detail] as const;
+        }),
+      );
 
       if (mountedRef.current) {
-        setProposals(proposalsData.proposals ?? []);
+        setProposals(proposalList);
+        setProposalDetails(Object.fromEntries(detailsEntries));
+        setActiveKpis(activeData.active ?? []);
         setCapacity(capacityData);
         setError(null);
       }
@@ -73,16 +104,22 @@ export function useKpiProposals(
   }, [load]);
 
   const vote = useCallback(
-    async (proposalId: string, decision: 'approve' | 'reject') => {
+    async (
+      proposalId: string,
+      decision: 'approve' | 'reject',
+      options?: { replaces?: string },
+    ) => {
       await fetchApi<{ proposal_id: string; status: string }>(
         `/api/kpis/proposals/${encodeURIComponent(proposalId)}/vote`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...getOperatorAuthHeaders(),
+          },
           body: JSON.stringify({
             vote: decision,
-            voter_id: 'operator',
-            voter_type: 'operator',
+            ...(options?.replaces ? { replaces: options.replaces } : {}),
           }),
         },
       );
@@ -148,5 +185,5 @@ export function useKpiProposals(
     };
   }, [load]);
 
-  return { proposals, capacity, loading, error, vote, refresh };
+  return { proposals, proposalDetails, activeKpis, capacity, loading, error, vote, refresh };
 }

@@ -1,39 +1,47 @@
 /**
  * KPI Pipeline Wiring — generated from kpi-pipeline-wiring.ts.hbs
  *
- * Instantiates the KpiProjectionEngine, loads active KPIs from the store,
- * and registers each KPI's pipeline with the engine.
+ * Instantiates the KpiProjectionEngine, registers static and dynamic KPI
+ * pipelines, and subscribes them to telemetry via Skynet.
  */
-import { KpiProjectionEngine } from '@sidequestteams/mission-control-sdk/kpis';
+import { KpiProjectionEngine, getStaticPipelineDescriptor } from '@sidequestteams/mission-control-sdk/kpis';
 import type { KpiRuntimeStore } from '@sidequestteams/mission-control-sdk/kpis/kpi-runtime-store';
+import type { PipelineDescriptor } from '@sidequestteams/mission-control-sdk/kpis';
+import type { KpiDefinition } from '@sidequestteams/mission-control-sdk/src/types.js';
 import type { SkynetClient } from '@sidequestteams/mission-control-sdk/skynet';
+import { TelemetrySubscriber } from '@sidequestteams/mission-control-sdk/src/skynet/telemetry.js';
 
 export async function initKpiPipelineEngine(
   store: KpiRuntimeStore,
   skynetClient: SkynetClient,
   teamSlug: string,
+  staticDefinitions: KpiDefinition[] = [],
+  manifestDynamicEntries: Array<{ definition: KpiDefinition; pipeline: PipelineDescriptor }> = [],
 ): Promise<KpiProjectionEngine> {
   const engine = new KpiProjectionEngine();
 
-  // Load all active KPIs from the store and register their pipelines
+  for (const definition of staticDefinitions) {
+    const pipeline = getStaticPipelineDescriptor(definition.id);
+    if (pipeline) {
+      engine.register(definition, pipeline);
+    }
+  }
+
+  for (const entry of manifestDynamicEntries) {
+    engine.register(entry.definition, entry.pipeline);
+  }
+
   const activeKpis = await store.listActive(teamSlug);
   for (const kpi of activeKpis) {
     engine.register(kpi.kpi_definition, kpi.pipeline);
   }
 
-  // Start the engine — subscribes to telemetry events via Skynet
-  engine.start({
-    subscribe(family, handler) {
-      skynetClient.onEvent((event) => {
-        if (event.type === family) {
-          handler(event);
-        }
-      });
-    },
-  });
+  skynetClient.connect();
+  const subscriber = new TelemetrySubscriber(skynetClient);
+  engine.start(subscriber);
 
   console.log(
-    `[{{teamSlug}}] KPI projection engine started with ${activeKpis.length} active pipeline(s)`,
+    `[{{teamSlug}}] KPI projection engine started with ${engine.size} pipeline(s)`,
   );
 
   return engine;

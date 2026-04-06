@@ -7,7 +7,7 @@ import {
   KpiProposalWidget,
 } from '@sidequestteams/mission-control-sdk/widgets';
 import { DynamicWidget } from '@sidequestteams/mission-control-sdk/primitives';
-import { useKpis, useManifest } from '@sidequestteams/mission-control-sdk/hooks';
+import { useKpis, useManifest, useRuntimeKpiWidgets } from '@sidequestteams/mission-control-sdk/hooks';
 import { useTheme } from '@sidequestteams/mission-control-sdk/theme';
 
 const TEAM_SPECIFIC_WIDGETS = {{{json teamSpecificWidgets}}};
@@ -29,6 +29,7 @@ const GRID_SPAN_CLASS = {
 export default function Dashboard() {
   const { team, loading } = useManifest();
   const { kpis } = useKpis({ rolePacks: team?.role_packs });
+  const { widgets: runtimeWidgets } = useRuntimeKpiWidgets(TEAM_SPECIFIC_WIDGETS);
   const { toggle, mode } = useTheme();
 
   if (loading) {
@@ -72,7 +73,7 @@ export default function Dashboard() {
         </div>
 
         {/* Team-specific widgets — driven by role packs, rendered via DynamicWidget */}
-        {TEAM_SPECIFIC_WIDGETS.map((descriptor) => (
+        {runtimeWidgets.map((descriptor) => (
           <div
             key={descriptor.id}
             className={GRID_SPAN_CLASS[descriptor.grid.w as keyof typeof GRID_SPAN_CLASS] ?? 'col-span-12'}

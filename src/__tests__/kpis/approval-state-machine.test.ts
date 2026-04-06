@@ -13,6 +13,7 @@ function makeStore(overrides: Partial<KpiRuntimeStore> = {}): KpiRuntimeStore {
     createProposal: vi.fn(async () => {}),
     getProposal: vi.fn(async () => null),
     listProposals: vi.fn(async () => []),
+    setProposalReplacement: vi.fn(async () => {}),
     transitionProposal: vi.fn(async () => {}),
     expireStaleProposals: vi.fn(async () => 0),
     castVote: vi.fn(async () => {}),

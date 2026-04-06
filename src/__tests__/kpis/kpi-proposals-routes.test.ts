@@ -31,6 +31,7 @@ function makeStore(overrides: Partial<KpiRuntimeStore> = {}): KpiRuntimeStore {
     createProposal: vi.fn(async () => {}),
     getProposal: vi.fn(async () => null),
     listProposals: vi.fn(async () => []),
+    setProposalReplacement: vi.fn(async () => {}),
     transitionProposal: vi.fn(async () => {}),
     expireStaleProposals: vi.fn(async () => 0),
     castVote: vi.fn(async () => {}),
@@ -52,16 +53,48 @@ const validProposalBody = {
   reason: 'needed for tracking',
 };
 
+function makeAgentReq(
+  body: unknown,
+  agentId = 'agent-1',
+  params: Record<string, string> = {},
+) {
+  return {
+    params,
+    body,
+    headers: { authorization: 'Bearer agent-token', 'x-agent-id': agentId },
+  };
+}
+
+function makeOperatorReq(params: Record<string, string>, body: unknown) {
+  return {
+    params,
+    body,
+    headers: { authorization: 'Bearer operator-token' },
+  };
+}
+
+function makeResolveActor() {
+  return (req: any) => {
+    if (req.headers?.authorization === 'Bearer operator-token') {
+      return { id: 'operator', type: 'operator' as const };
+    }
+    if (req.headers?.authorization === 'Bearer agent-token') {
+      return { id: req.headers['x-agent-id'] ?? 'agent-1', type: 'agent' as const };
+    }
+    return null;
+  };
+}
+
 describe('KPI Proposals Router', () => {
   describe('POST /propose', () => {
     it('creates a proposal and returns 201', async () => {
       const store = makeStore();
       const router = createMockRouter();
       const onProposed = vi.fn();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, onProposed })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, onProposed, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
-      await router.routes.post['/propose']({ body: validProposalBody }, res);
+      await router.routes.post['/propose'](makeAgentReq(validProposalBody), res);
 
       expect(res.status).toHaveBeenCalledWith(201);
       expect(res.body.proposal_id).toMatch(/^kpi-prop-/);
@@ -73,12 +106,11 @@ describe('KPI Proposals Router', () => {
     it('rejects when at capacity without replaces', async () => {
       const store = makeStore({ countActive: vi.fn(async () => MAX_DYNAMIC_KPIS) });
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
-      await router.routes.post['/propose']({ body: validProposalBody }, res);
-      expect(res.status).toHaveBeenCalledWith(409);
-      expect(res.body.error).toContain('capacity');
+      await router.routes.post['/propose'](makeAgentReq(validProposalBody), res);
+      expect(res.status).toHaveBeenCalledWith(201);
     });
 
     it('rejects duplicate active KPI ID', async () => {
@@ -86,10 +118,10 @@ describe('KPI Proposals Router', () => {
         getActive: vi.fn(async () => ({ id: 'test-kpi' } as ActiveKpi)),
       });
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
-      await router.routes.post['/propose']({ body: validProposalBody }, res);
+      await router.routes.post['/propose'](makeAgentReq(validProposalBody), res);
       expect(res.status).toHaveBeenCalledWith(409);
       expect(res.body.error).toContain('already active');
     });
@@ -101,12 +133,13 @@ describe('KPI Proposals Router', () => {
         )),
       });
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
-      await router.routes.post['/propose']({
-        body: { ...validProposalBody, replaces: 'replacement-kpi' },
-      }, res);
+      await router.routes.post['/propose'](
+        makeAgentReq({ ...validProposalBody, replaces: 'replacement-kpi' }),
+        res,
+      );
 
       expect(res.status).toHaveBeenCalledWith(409);
       expect(res.body.error).toContain('Replacement KPI');
@@ -115,16 +148,16 @@ describe('KPI Proposals Router', () => {
     it('auto-counts the proposer vote for team-scoped KPIs via proposed_by', async () => {
       const store = makeStore();
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
-      await router.routes.post['/propose']({
-        body: {
+      await router.routes.post['/propose'](
+        makeAgentReq({
           ...validProposalBody,
           kpi: { ...validProposalBody.kpi, scope: 'team', agent_id: undefined },
-          proposed_by: 'agent-9',
-        },
-      }, res);
+        }, 'agent-9'),
+        res,
+      );
 
       expect(store.castVote).toHaveBeenCalledWith(expect.objectContaining({
         voter_id: 'agent-9',
@@ -136,10 +169,10 @@ describe('KPI Proposals Router', () => {
     it('returns 400 for missing fields', async () => {
       const store = makeStore();
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
-      await router.routes.post['/propose']({ body: {} }, res);
+      await router.routes.post['/propose'](makeAgentReq({}), res);
       expect(res.status).toHaveBeenCalledWith(400);
     });
   });
@@ -157,11 +190,11 @@ describe('KPI Proposals Router', () => {
         countVotes: vi.fn(async () => ({ approve: 1, reject: 0 })),
       });
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
       await router.routes.post['/proposals/:id/vote'](
-        { params: { id: 'prop-1' }, body: { vote: 'approve', voter_id: 'agent-2', voter_type: 'agent' } },
+        makeAgentReq({ vote: 'approve' }, 'agent-2', { id: 'prop-1' }),
         res,
       );
       expect(store.expireStaleProposals).toHaveBeenCalledTimes(1);
@@ -179,11 +212,11 @@ describe('KPI Proposals Router', () => {
         getProposal: vi.fn(async () => expiredProposal),
       });
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
       await router.routes.post['/proposals/:id/vote'](
-        { params: { id: 'prop-1' }, body: { vote: 'approve', voter_id: 'agent-2', voter_type: 'agent' } },
+        makeAgentReq({ vote: 'approve' }, 'agent-2', { id: 'prop-1' }),
         res,
       );
 
@@ -198,11 +231,11 @@ describe('KPI Proposals Router', () => {
         getProposal: vi.fn(async () => pendingProposal),
       });
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
       await router.routes.post['/proposals/:id/vote'](
-        { params: { id: 'prop-1' }, body: { vote: 'reject', voter_id: 'agent-2' } },
+        makeAgentReq({ vote: 'reject' }, 'agent-2', { id: 'prop-1' }),
         res,
       );
       expect(store.transitionProposal).toHaveBeenCalledWith('prop-1', 'rejected', expect.any(String));
@@ -216,11 +249,11 @@ describe('KPI Proposals Router', () => {
         listVotes: vi.fn(async () => []),
       });
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
       await router.routes.post['/proposals/:id/vote'](
-        { params: { id: 'prop-1' }, body: { vote: 'approve', voter_id: 'agent-3', voter_type: 'agent' } },
+        makeAgentReq({ vote: 'approve' }, 'agent-3', { id: 'prop-1' }),
         res,
       );
       expect(store.transitionProposal).toHaveBeenCalledWith('prop-1', 'operator_pending');
@@ -237,11 +270,11 @@ describe('KPI Proposals Router', () => {
       });
       const onActivated = vi.fn();
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, onActivated })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, onActivated, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
       await router.routes.post['/proposals/:id/vote'](
-        { params: { id: 'prop-1' }, body: { vote: 'approve', voter_id: 'agent-3', voter_type: 'agent' } },
+        makeAgentReq({ vote: 'approve' }, 'agent-3', { id: 'prop-1' }),
         res,
       );
       expect(store.activate).toHaveBeenCalledTimes(1);
@@ -252,14 +285,55 @@ describe('KPI Proposals Router', () => {
     it('returns 404 for unknown proposal', async () => {
       const store = makeStore();
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
       await router.routes.post['/proposals/:id/vote'](
-        { params: { id: 'nope' }, body: { vote: 'approve', voter_id: 'agent-1' } },
+        makeAgentReq({ vote: 'approve' }, 'agent-1', { id: 'nope' }),
         res,
       );
       expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    it('requires operator replacement selection when approving at capacity', async () => {
+      const store = makeStore({
+        countActive: vi.fn(async () => MAX_DYNAMIC_KPIS),
+        getProposal: vi.fn(async () => pendingProposal),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.post['/proposals/:id/vote'](
+        makeOperatorReq({ id: 'prop-1' }, { vote: 'approve' }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.body.error).toContain('Select a KPI to replace');
+    });
+
+    it('persists operator-selected replacement before approval', async () => {
+      const proposal = { ...pendingProposal, status: 'operator_pending' };
+      const store = makeStore({
+        countActive: vi.fn(async () => MAX_DYNAMIC_KPIS),
+        getProposal: vi.fn(async () => proposal),
+        getActive: vi.fn(async () => ({ id: 'old-kpi' } as ActiveKpi)),
+        countVotes: vi.fn(async () => ({ approve: 3, reject: 0 })),
+        listVotes: vi.fn(async () => [
+          { proposal_id: 'prop-1', voter_id: 'operator', voter_type: 'operator', vote: 'approve', voted_at: '2026-04-03T01:00:00.000Z' },
+        ]),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.post['/proposals/:id/vote'](
+        makeOperatorReq({ id: 'prop-1' }, { vote: 'approve', replaces: 'old-kpi' }),
+        res,
+      );
+
+      expect(store.setProposalReplacement).toHaveBeenCalledWith('prop-1', 'old-kpi');
     });
   });
 
@@ -267,7 +341,7 @@ describe('KPI Proposals Router', () => {
     it('returns capacity info', async () => {
       const store = makeStore({ countActive: vi.fn(async () => 7) });
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
       await router.routes.get['/capacity']({}, res);
@@ -282,7 +356,7 @@ describe('KPI Proposals Router', () => {
         getActive: vi.fn(async () => ({ id: 'kpi-1' } as ActiveKpi)),
       });
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
       await router.routes.delete['/:id']({ params: { id: 'kpi-1' } }, res);
@@ -294,11 +368,23 @@ describe('KPI Proposals Router', () => {
     it('returns 404 for non-active KPI', async () => {
       const store = makeStore();
       const router = createMockRouter();
-      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5 })(router);
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
       await router.routes.delete['/:id']({ params: { id: 'nope' } }, res);
       expect(res.status).toHaveBeenCalledWith(404);
+    });
+  });
+
+  describe('GET /active', () => {
+    it('returns active dynamic KPIs', async () => {
+      const store = makeStore({ listActive: vi.fn(async () => [{ id: 'kpi-1' } as ActiveKpi]) });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.get['/active']({}, res);
+      expect(res.body.active).toHaveLength(1);
     });
   });
 });
