@@ -75,8 +75,6 @@ const manifestDynamicEntries: Array<{
     })
   : [];
 
-const manifestDynamicRegistry: KpiDefinition[] = manifestDynamicEntries.map((entry) => entry.definition);
-
 // Initialize Skynet client from manifest connectivity
 const skynetClient = new SkynetClient({
   wsUrl: teamBlock?.connectivity?.skynet?.ws_url ?? 'ws://skynet:8080',
@@ -179,7 +177,6 @@ async function getRuntimeKpiDefinitions(): Promise<KpiDefinition[]> {
 async function getAllKpiDefinitions(): Promise<KpiDefinition[]> {
   return mergeKpiDefinitions(
     KPI_REGISTRY,
-    manifestDynamicRegistry,
     await getRuntimeKpiDefinitions(),
   );
 }
@@ -219,10 +216,6 @@ async function reconcileManifestDynamicKpis(): Promise<void> {
       replaced_by: existingCatalog?.replaced_by,
       status: 'active',
     } satisfies KpiCatalogEntry);
-  }
-
-  if (manifestDynamicEntries.length > 0) {
-    await kpiStore.catalogMarkReused('{{teamSlug}}', manifestDynamicEntries.map((entry) => entry.definition.id));
   }
 }
 
