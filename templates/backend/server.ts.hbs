@@ -115,6 +115,8 @@ const kpiSchema = process.env.KPI_POSTGRES_SCHEMA ?? 'public';
 
 const kpiStore = createKpiRuntimeStore(kpiPool, kpiSchema);
 let projectionEngine: Awaited<ReturnType<typeof initKpiPipelineEngine>> | null = null;
+const KPI_BOOTSTRAP_MAX_ATTEMPTS = Number(process.env.KPI_BOOTSTRAP_MAX_ATTEMPTS ?? 12);
+const KPI_BOOTSTRAP_RETRY_DELAY_MS = Number(process.env.KPI_BOOTSTRAP_RETRY_DELAY_MS ?? 5000);
 
 function envKeyForAgentGatewayToken(agentId: string): string {
   return `OPENCLAW_GATEWAY_TOKEN_${agentId.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
@@ -174,6 +176,36 @@ function buildMockKpi(definition: KpiDefinition): KpiValue {
     freshness: 'mock',
     source: 'sdk-default',
   };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryKpiBootstrap<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  const maxAttempts = Number.isFinite(KPI_BOOTSTRAP_MAX_ATTEMPTS) && KPI_BOOTSTRAP_MAX_ATTEMPTS > 0
+    ? Math.floor(KPI_BOOTSTRAP_MAX_ATTEMPTS)
+    : 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts) {
+        break;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[kpi-store] Bootstrap attempt ${attempt}/${maxAttempts} failed: ${message}. Retrying in ${KPI_BOOTSTRAP_RETRY_DELAY_MS}ms.`,
+      );
+      await sleep(KPI_BOOTSTRAP_RETRY_DELAY_MS);
+    }
+  }
+
+  throw lastError;
 }
 
 function filterDefinitionsForRolePacks(
@@ -460,22 +492,24 @@ setInterval(() => {
 }, 30000);
 
 async function bootstrapRuntime(): Promise<void> {
-  await kpiPool.query(`CREATE SCHEMA IF NOT EXISTS ${kpiSchema}`);
-  for (const stmt of buildKpiBootstrapStatements(kpiSchema)) {
-    await kpiPool.query(stmt);
-  }
+  await retryKpiBootstrap(async () => {
+    await kpiPool.query(`CREATE SCHEMA IF NOT EXISTS ${kpiSchema}`);
+    for (const stmt of buildKpiBootstrapStatements(kpiSchema)) {
+      await kpiPool.query(stmt);
+    }
 
-  await reconcileManifestDynamicKpis();
-  projectionEngine = await initKpiPipelineEngine(
-    kpiStore,
-    skynetClient,
-    '{{teamSlug}}',
-    KPI_REGISTRY,
-    manifestDynamicEntries.map((entry) => ({
-      definition: entry.definition,
-      pipeline: entry.pipeline,
-    })),
-  );
+    await reconcileManifestDynamicKpis();
+    projectionEngine = await initKpiPipelineEngine(
+      kpiStore,
+      skynetClient,
+      '{{teamSlug}}',
+      KPI_REGISTRY,
+      manifestDynamicEntries.map((entry) => ({
+        definition: entry.definition,
+        pipeline: entry.pipeline,
+      })),
+    );
+  });
 }
 
 bootstrapRuntime()
