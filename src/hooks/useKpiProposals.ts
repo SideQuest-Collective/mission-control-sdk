@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ActiveKpi, KpiProposalRecord, KpiProposalVote } from '../kpis/types.js';
-import { fetchApi } from './api-client.js';
+import { fetchApi, hasConfiguredApiAuthorization } from './api-client.js';
 
 export interface KpiCapacity {
   active: number;
@@ -18,6 +18,7 @@ export interface UseKpiProposalsResult {
   proposalDetails: Record<string, { proposal: KpiProposalRecord; votes: KpiProposalVote[] }>;
   activeKpis: ActiveKpi[];
   capacity: KpiCapacity | null;
+  canModerate: boolean;
   loading: boolean;
   error: Error | null;
   vote: (
@@ -30,17 +31,6 @@ export interface UseKpiProposalsResult {
 
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
 
-function getOperatorAuthHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  const configuredToken = typeof process !== 'undefined'
-    ? process.env.NEXT_PUBLIC_MC_OPERATOR_TOKEN
-    : undefined;
-  if (configuredToken) {
-    headers.Authorization = `Bearer ${configuredToken}`;
-  }
-  return headers;
-}
-
 /**
  * Fetches KPI proposals and capacity from the REST API.
  * Polls at a configurable interval. Listens for WebSocket
@@ -51,6 +41,7 @@ export function useKpiProposals(
   options: UseKpiProposalsOptions = {},
 ): UseKpiProposalsResult {
   const pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL_MS;
+  const canModerate = hasConfiguredApiAuthorization();
 
   const [proposals, setProposals] = useState<KpiProposalRecord[]>([]);
   const [proposalDetails, setProposalDetails] = useState<Record<string, { proposal: KpiProposalRecord; votes: KpiProposalVote[] }>>({});
@@ -109,13 +100,16 @@ export function useKpiProposals(
       decision: 'approve' | 'reject',
       options?: { replaces?: string },
     ) => {
+      if (!canModerate) {
+        throw new Error('KPI proposal voting requires configured API authorization');
+      }
+
       await fetchApi<{ proposal_id: string; status: string }>(
         `/api/kpis/proposals/${encodeURIComponent(proposalId)}/vote`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...getOperatorAuthHeaders(),
           },
           body: JSON.stringify({
             vote: decision,
@@ -126,7 +120,7 @@ export function useKpiProposals(
       // Refresh after voting
       void load();
     },
-    [load],
+    [canModerate, load],
   );
 
   // Polling
@@ -185,5 +179,5 @@ export function useKpiProposals(
     };
   }, [load]);
 
-  return { proposals, proposalDetails, activeKpis, capacity, loading, error, vote, refresh };
+  return { proposals, proposalDetails, activeKpis, capacity, canModerate, loading, error, vote, refresh };
 }

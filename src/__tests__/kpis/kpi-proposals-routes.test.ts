@@ -202,6 +202,57 @@ describe('KPI Proposals Router', () => {
       expect(res.body.status).toBe('pending');
     });
 
+    it('rejects spoofed operator votes without authenticated actor resolution', async () => {
+      const store = makeStore({
+        getProposal: vi.fn(async () => pendingProposal),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.post['/proposals/:id/vote'](
+        {
+          params: { id: 'prop-1' },
+          body: {
+            vote: 'approve',
+            voter_id: 'operator',
+            voter_type: 'operator',
+          },
+          headers: {},
+        },
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(store.castVote).not.toHaveBeenCalled();
+    });
+
+    it('ignores client-supplied voter identity fields in favor of the authenticated actor', async () => {
+      const store = makeStore({
+        getProposal: vi.fn(async () => pendingProposal),
+        countVotes: vi.fn(async () => ({ approve: 1, reject: 0 })),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.post['/proposals/:id/vote'](
+        makeAgentReq({
+          vote: 'approve',
+          voter_id: 'operator',
+          voter_type: 'operator',
+        }, 'agent-7', { id: 'prop-1' }),
+        res,
+      );
+
+      expect(store.castVote).toHaveBeenCalledWith(expect.objectContaining({
+        proposal_id: 'prop-1',
+        voter_id: 'agent-7',
+        voter_type: 'agent',
+        vote: 'approve',
+      }));
+    });
+
     it('blocks votes on expired proposals after expiring stale records', async () => {
       const expiredProposal: KpiProposalRecord = {
         ...pendingProposal,

@@ -12,6 +12,18 @@ export function configureApiClient(options: ApiClientOptions): void {
   globalOptions = { ...globalOptions, ...options };
 }
 
+/** Read the current API client configuration. */
+export function getApiClientOptions(): Readonly<ApiClientOptions> {
+  return globalOptions;
+}
+
+/** Returns true when a caller configured an Authorization header for API requests. */
+export function hasConfiguredApiAuthorization(): boolean {
+  const headers = globalOptions.headers ?? {};
+  const authorization = headers.Authorization ?? headers.authorization;
+  return typeof authorization === 'string' && authorization.trim().length > 0;
+}
+
 /** Fetch JSON from an API endpoint, resolving against the configured base URL */
 export async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
   const url = globalOptions.baseUrl

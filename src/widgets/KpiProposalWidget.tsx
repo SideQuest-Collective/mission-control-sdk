@@ -43,6 +43,7 @@ function ProposalCard({
   rosterSize,
   capacityRemaining,
   activeKpis,
+  canModerate,
   replacementId,
   onReplacementChange,
   onApprove,
@@ -53,6 +54,7 @@ function ProposalCard({
   rosterSize: number;
   capacityRemaining: number | null;
   activeKpis: ActiveKpi[];
+  canModerate: boolean;
   replacementId: string;
   onReplacementChange: (replacementId: string) => void;
   onApprove: () => void;
@@ -252,7 +254,7 @@ function ProposalCard({
         &ldquo;{reason}&rdquo;
       </div>
 
-      {canVote && (
+      {canVote && canModerate && (
         <div style={{ display: 'flex', gap: 'var(--mc-space-2, 8px)' }}>
           <button
             onClick={onApprove}
@@ -290,6 +292,17 @@ function ProposalCard({
           </button>
         </div>
       )}
+
+      {canVote && !canModerate && (
+        <div
+          style={{
+            fontSize: 'var(--mc-text-caption, 0.6875rem)',
+            color: 'var(--mc-text-tertiary, #5c6478)',
+          }}
+        >
+          Approval actions require authenticated API access.
+        </div>
+      )}
     </div>
   );
 }
@@ -301,6 +314,7 @@ export function KpiProposalWidget() {
     proposalDetails,
     activeKpis,
     capacity,
+    canModerate,
     loading,
     error,
     vote,
@@ -437,6 +451,7 @@ export function KpiProposalWidget() {
             rosterSize={rosterSize}
             capacityRemaining={capacity?.remaining ?? null}
             activeKpis={activeKpis.filter((activeKpi) => activeKpi.id !== proposal.proposal.kpi.id)}
+            canModerate={canModerate}
             replacementId={replacementId}
             onReplacementChange={(value) => {
               setReplacementSelections((current) => ({ ...current, [proposal.id]: value }));
