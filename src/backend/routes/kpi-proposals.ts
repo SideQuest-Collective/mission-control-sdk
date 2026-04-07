@@ -250,6 +250,7 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
     // DELETE /:id — Deactivate a dynamic KPI
     router.delete('/:id', async (req: any, res: any) => {
       try {
+        requireActor(req, 'operator');
         const existing = await deps.store.getActive(deps.teamSlug, req.params.id);
         if (!existing) {
           res.status(404).json({ error: 'Active KPI not found' });
@@ -262,7 +263,8 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
         res.json({ ok: true, deactivated: req.params.id });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Internal error';
-        res.status(500).json({ error: message });
+        const status = err instanceof RouteError ? err.status : 500;
+        res.status(status).json({ error: message });
       }
     });
 

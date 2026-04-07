@@ -166,6 +166,33 @@ describe('KPI Proposals Router', () => {
       }));
     });
 
+    it('ignores client-supplied proposed_by in favor of the authenticated actor', async () => {
+      const store = makeStore();
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.post['/propose'](
+        makeAgentReq({
+          ...validProposalBody,
+          kpi: {
+            ...validProposalBody.kpi,
+            scope: 'team',
+            agent_id: undefined,
+          },
+          proposed_by: 'operator',
+        }, 'agent-7'),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(201);
+      expect(store.createProposal).toHaveBeenCalledWith(expect.objectContaining({
+        proposal: expect.objectContaining({
+          proposed_by: 'agent-7',
+        }),
+      }));
+    });
+
     it('returns 400 for missing fields', async () => {
       const store = makeStore();
       const router = createMockRouter();
@@ -402,6 +429,23 @@ describe('KPI Proposals Router', () => {
   });
 
   describe('DELETE /:id', () => {
+    it('requires operator authentication', async () => {
+      const store = makeStore({
+        getActive: vi.fn(async () => ({ id: 'kpi-1' } as ActiveKpi)),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.delete['/:id']({
+        params: { id: 'kpi-1' },
+        headers: { authorization: 'Bearer agent-token', 'x-agent-id': 'agent-1' },
+      }, res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(store.deactivate).not.toHaveBeenCalled();
+    });
+
     it('deactivates and archives', async () => {
       const store = makeStore({
         getActive: vi.fn(async () => ({ id: 'kpi-1' } as ActiveKpi)),
@@ -410,7 +454,7 @@ describe('KPI Proposals Router', () => {
       createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
-      await router.routes.delete['/:id']({ params: { id: 'kpi-1' } }, res);
+      await router.routes.delete['/:id'](makeOperatorReq({ id: 'kpi-1' }, undefined), res);
       expect(store.deactivate).toHaveBeenCalledWith('team-a', 'kpi-1');
       expect(store.catalogTransition).toHaveBeenCalledWith('team-a', 'kpi-1', 'archived');
       expect(res.body.ok).toBe(true);
@@ -422,7 +466,7 @@ describe('KPI Proposals Router', () => {
       createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
 
       const res = mockRes();
-      await router.routes.delete['/:id']({ params: { id: 'nope' } }, res);
+      await router.routes.delete['/:id'](makeOperatorReq({ id: 'nope' }, undefined), res);
       expect(res.status).toHaveBeenCalledWith(404);
     });
   });
