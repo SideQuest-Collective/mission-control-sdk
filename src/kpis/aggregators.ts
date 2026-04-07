@@ -1,29 +1,21 @@
 import type { SkynetEvent } from '../skynet/types.js';
 import type { AggregationType } from './types.js';
+import { resolveEventPath } from './event-paths.js';
 
 /**
  * Extract a numeric value from an event payload by dot-delimited path.
+ * Falls back to top-level event fields for telemetry identifiers.
  * Returns NaN if the field is missing or non-numeric.
  */
 function extractNumeric(event: SkynetEvent, field: string): number {
-  const parts = field.split('.');
-  let current: unknown = event.payload;
-  for (const part of parts) {
-    if (current == null || typeof current !== 'object') return NaN;
-    current = (current as Record<string, unknown>)[part];
-  }
+  const current = resolveEventPath(event, field);
   return typeof current === 'number' ? current : Number(current);
 }
 
-/** Check if an event's payload matches a predicate (all key-value pairs must match). */
+/** Check if an event matches a predicate (all key-value pairs must match). */
 function matchesPredicate(event: SkynetEvent, predicate: Record<string, string>): boolean {
   for (const [key, expected] of Object.entries(predicate)) {
-    const parts = key.split('.');
-    let current: unknown = event.payload;
-    for (const part of parts) {
-      if (current == null || typeof current !== 'object') return false;
-      current = (current as Record<string, unknown>)[part];
-    }
+    const current = resolveEventPath(event, key);
     if (String(current) !== expected) return false;
   }
   return true;

@@ -58,10 +58,28 @@ describe('KpiProjection', () => {
     });
     const proj = new KpiProjection(makeDef(), pipeline);
 
-    proj.ingest(makeEvent('run.ended', BASE_TIME, { agent_id: 'scraper' }));
-    proj.ingest(makeEvent('run.ended', BASE_TIME + 100, { agent_id: 'other' }));
+    proj.ingest({
+      ...makeEvent('run.ended', BASE_TIME),
+      agent_id: 'scraper',
+    });
+    proj.ingest({
+      ...makeEvent('run.ended', BASE_TIME + 100),
+      agent_id: 'other',
+    });
 
     const value = proj.compute(BASE_TIME + 200);
+    expect(value.value).toBe(1);
+  });
+
+  it('prefers payload fields before top-level fields when both exist', () => {
+    const pipeline = makePipeline({
+      sources: [{ family: 'system.event', filter: { type: 'task_assigned' } }],
+    });
+    const proj = new KpiProjection(makeDef(), pipeline);
+
+    proj.ingest(makeEvent('system.event', BASE_TIME, { type: 'task_assigned' }));
+
+    const value = proj.compute(BASE_TIME + 100);
     expect(value.value).toBe(1);
   });
 

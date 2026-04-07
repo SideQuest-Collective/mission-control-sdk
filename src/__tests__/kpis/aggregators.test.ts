@@ -30,6 +30,19 @@ describe('aggregate', () => {
     expect(aggregate(events, config)).toBe(2);
   });
 
+  it('count_where — falls back to top-level telemetry fields', () => {
+    const events = [
+      { ...makeEvent(), agent_id: 'agent-1' },
+      { ...makeEvent(), agent_id: 'agent-2' },
+      { ...makeEvent(), agent_id: 'agent-1' },
+    ];
+    const config: AggregationType = {
+      type: 'count_where',
+      predicate: { agent_id: 'agent-1' },
+    };
+    expect(aggregate(events, config)).toBe(2);
+  });
+
   it('avg — computes mean of a numeric field', () => {
     const events = [
       makeEvent({ latency: 100 }),

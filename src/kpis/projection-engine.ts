@@ -1,7 +1,8 @@
 import type { KpiDefinition, KpiValue } from '../types.js';
 import type { SkynetEvent } from '../skynet/types.js';
 import type { TelemetrySubscriber } from '../skynet/telemetry.js';
-import type { PipelineDescriptor, TelemetryFamily } from './types.js';
+import type { PipelineDescriptor } from './types.js';
+import { TELEMETRY_FAMILIES } from './types.js';
 import { KpiProjection } from './projection.js';
 
 const DEFAULT_FLUSH_INTERVAL_MS = 30_000;
@@ -29,8 +30,9 @@ export class KpiProjectionEngine {
 
     // If we have an active subscriber, subscribe to this family
     if (this.subscriber) {
-      const family = pipeline.sources[0].family;
-      this.ensureSubscribed(family);
+      for (const source of pipeline.sources) {
+        this.ensureSubscribed(source.family);
+      }
     }
   }
 
@@ -77,23 +79,7 @@ export class KpiProjectionEngine {
     this.subscriber = subscriber;
     this.subscribedFamilies.clear();
 
-    // Collect all families from active projections
-    const families = new Set<TelemetryFamily>();
-    for (const [, projection] of this.projections) {
-      // Access the source family via the projection's kpiId and our stored pipelines
-      // We need to subscribe to all known families since projections filter internally
-    }
-
-    // Subscribe to all telemetry families that projections might care about
-    const allFamilies: TelemetryFamily[] = [
-      'run.ended',
-      'run.started',
-      'usage.delta',
-      'cost.estimated',
-      'session.ended',
-      'system.event',
-    ];
-    for (const family of allFamilies) {
+    for (const family of TELEMETRY_FAMILIES) {
       this.ensureSubscribed(family);
     }
 

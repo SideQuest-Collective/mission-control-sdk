@@ -4,6 +4,11 @@
 export interface SkynetEvent {
   type: string;
   timestamp: number;
+  event_id?: string;
+  agent_id?: string;
+  session_id?: string;
+  sequence?: number;
+  occurred_at?: string;
   payload: Record<string, unknown>;
 }
 

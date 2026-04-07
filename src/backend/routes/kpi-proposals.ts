@@ -1,8 +1,10 @@
 import type { KpiRuntimeStore } from '../../kpis/kpi-runtime-store.js';
 import type { ActiveKpi, KpiProposalRecord, KpiProposal } from '../../kpis/types.js';
+import { validatePipelineDescriptor } from '../../kpis/validation.js';
 
 const MAX_DYNAMIC_KPIS = 10;
 const PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const IN_FLIGHT_PROPOSAL_STATUSES = new Set(['pending', 'team_voted', 'operator_pending', 'approved']);
 
 class RouteError extends Error {
   constructor(
@@ -60,10 +62,16 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
     // POST /propose — Agent submits a KPI proposal
     router.post('/propose', async (req: any, res: any) => {
       try {
+        await expireStale();
         const actor = requireActor(req, 'agent');
         const body = req.body as KpiProposal | undefined;
         if (!body?.kpi?.id || !body?.kpi?.name || !body?.pipeline || !body?.reason) {
           res.status(400).json({ error: 'Missing required fields: kpi.id, kpi.name, pipeline, reason' });
+          return;
+        }
+        const pipelineErrors = validatePipelineDescriptor(body.pipeline);
+        if (pipelineErrors.length > 0) {
+          res.status(400).json({ error: `Invalid pipeline: ${pipelineErrors.join('; ')}` });
           return;
         }
         if (body.kpi.scope === 'agent' && body.kpi.agent_id && body.kpi.agent_id !== actor.id) {
@@ -90,6 +98,17 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
         const existing = await deps.store.getActive(deps.teamSlug, normalizedProposal.kpi.id);
         if (existing) {
           res.status(409).json({ error: `KPI "${normalizedProposal.kpi.id}" is already active` });
+          return;
+        }
+        const proposals = await deps.store.listProposals(deps.teamSlug);
+        const inFlightDuplicate = proposals.find((proposal) => (
+          proposal.proposal.kpi.id === normalizedProposal.kpi.id
+          && IN_FLIGHT_PROPOSAL_STATUSES.has(proposal.status)
+        ));
+        if (inFlightDuplicate) {
+          res.status(409).json({
+            error: `KPI "${normalizedProposal.kpi.id}" already has an in-flight proposal (${inFlightDuplicate.id})`,
+          });
           return;
         }
 

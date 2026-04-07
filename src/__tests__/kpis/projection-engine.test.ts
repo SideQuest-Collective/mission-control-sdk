@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { KpiDefinition } from '../../types.js';
 import type { SkynetEvent } from '../../skynet/types.js';
-import type { PipelineDescriptor } from '../../kpis/types.js';
+import { TELEMETRY_FAMILIES, type PipelineDescriptor } from '../../kpis/types.js';
 import { KpiProjectionEngine } from '../../kpis/projection-engine.js';
 
 const BASE_TIME = 1_000_000_000;
@@ -113,8 +113,7 @@ describe('KpiProjectionEngine', () => {
     engine.start(sub as any);
     expect(engine.running).toBe(true);
 
-    // The engine should have subscribed to families
-    expect(sub.handlers.size).toBeGreaterThan(0);
+    expect(Array.from(sub.handlers.keys()).sort()).toEqual([...TELEMETRY_FAMILIES].sort());
 
     engine.stop();
     expect(engine.running).toBe(false);
@@ -130,6 +129,21 @@ describe('KpiProjectionEngine', () => {
 
     // Simulate an incoming event via the subscriber
     sub.emit(makeEvent('run.ended', BASE_TIME));
+
+    const value = engine.compute('kpi_a', BASE_TIME + 100);
+    expect(value!.value).toBe(1);
+
+    engine.stop();
+  });
+
+  it('receives events from extended telemetry families', () => {
+    const engine = new KpiProjectionEngine(60_000);
+    engine.register(makeDef('kpi_a'), makePipeline('cost.billed'));
+
+    const sub = mockSubscriber();
+    engine.start(sub as any);
+
+    sub.emit(makeEvent('cost.billed', BASE_TIME, { billed_cost_usd: 1.25 }));
 
     const value = engine.compute('kpi_a', BASE_TIME + 100);
     expect(value!.value).toBe(1);

@@ -10,8 +10,9 @@ import type { PipelineDescriptor } from './types.js';
  *   data_source=queue               → family: system.event, filter type=queue_snapshot
  *   data_source=github              → family: system.event, filter type=github_webhook
  *
- * Filter keys and aggregation field paths are relative to event.payload
- * (the projection engine's matches() and aggregator start from event.payload).
+ * Filter keys and aggregation field paths resolve from event.payload first,
+ * then fall back to top-level event fields for telemetry identifiers such as
+ * agent/session metadata.
  */
 
 export const STATIC_PIPELINE_MAP: Record<string, PipelineDescriptor> = {

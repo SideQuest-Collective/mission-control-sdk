@@ -2,13 +2,27 @@ import type { KpiDefinition, KpiCategory, TeamSpecificWidgetDescriptor } from '.
 
 // ── Pipeline descriptor types (local copies — contracts/ has the canonical version) ──
 
-export type TelemetryFamily =
-  | 'run.ended'
-  | 'run.started'
-  | 'usage.delta'
-  | 'cost.estimated'
-  | 'session.ended'
-  | 'system.event';
+export const TELEMETRY_FAMILIES = [
+  'session.started',
+  'session.updated',
+  'session.ended',
+  'usage.delta',
+  'context.updated',
+  'run.started',
+  'run.ended',
+  'run.failed',
+  'cost.estimated',
+  'cost.billed',
+  'system.event',
+] as const;
+
+export type TelemetryFamily = typeof TELEMETRY_FAMILIES[number];
+
+export const PIPELINE_WINDOWS = ['1h', '6h', '24h', '7d'] as const;
+export type PipelineWindow = typeof PIPELINE_WINDOWS[number];
+
+export const PIPELINE_OUTPUT_UNITS = ['count', 'percent', 'hours', 'ms'] as const;
+export type PipelineOutputUnit = typeof PIPELINE_OUTPUT_UNITS[number];
 
 export interface PipelineSource {
   family: TelemetryFamily;
@@ -30,8 +44,8 @@ export interface PipelineDescriptor {
   version: 1;
   sources: [PipelineSource];
   aggregation: AggregationType;
-  window: string; // "1h" | "6h" | "24h" | "7d"
-  output_unit: string; // "count" | "percent" | "hours" | "ms"
+  window: PipelineWindow;
+  output_unit: PipelineOutputUnit;
 }
 
 // ── KPI Proposal types ──

@@ -98,6 +98,7 @@ describe('KPI Proposals Router', () => {
 
       expect(res.status).toHaveBeenCalledWith(201);
       expect(res.body.proposal_id).toMatch(/^kpi-prop-/);
+      expect(store.expireStaleProposals).toHaveBeenCalledTimes(1);
       expect(store.createProposal).toHaveBeenCalledTimes(1);
       expect(store.castVote).toHaveBeenCalledTimes(1); // auto-approve
       expect(onProposed).toHaveBeenCalledTimes(1);
@@ -201,6 +202,50 @@ describe('KPI Proposals Router', () => {
       const res = mockRes();
       await router.routes.post['/propose'](makeAgentReq({}), res);
       expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('returns 400 for invalid pipeline descriptors', async () => {
+      const store = makeStore();
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.post['/propose'](
+        makeAgentReq({
+          ...validProposalBody,
+          pipeline: {
+            ...validProposalBody.pipeline,
+            sources: [{ family: 'unsupported.family' }],
+          },
+        }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.body.error).toContain('Invalid pipeline');
+      expect(store.createProposal).not.toHaveBeenCalled();
+    });
+
+    it('rejects duplicate in-flight proposal IDs for the same KPI', async () => {
+      const store = makeStore({
+        listProposals: vi.fn(async () => [{
+          id: 'prop-1',
+          team_slug: 'team-a',
+          proposal: validProposalBody as any,
+          status: 'pending',
+          created_at: '2026-04-03T00:00:00.000Z',
+          expires_at: '2026-04-04T00:00:00.000Z',
+        }]),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.post['/propose'](makeAgentReq(validProposalBody), res);
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.body.error).toContain('in-flight proposal');
+      expect(store.createProposal).not.toHaveBeenCalled();
     });
   });
 

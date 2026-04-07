@@ -1,6 +1,7 @@
 import type { KpiDefinition, KpiValue } from '../types.js';
 import type { SkynetEvent } from '../skynet/types.js';
 import type { PipelineDescriptor } from './types.js';
+import { resolveEventPath } from './event-paths.js';
 import { SlidingWindow } from './sliding-window.js';
 import { aggregate } from './aggregators.js';
 
@@ -35,12 +36,7 @@ export class KpiProjection {
     if (event.type !== this.sourceFamily) return false;
     if (!this.sourceFilter) return true;
     for (const [key, expected] of Object.entries(this.sourceFilter)) {
-      const parts = key.split('.');
-      let current: unknown = event.payload;
-      for (const part of parts) {
-        if (current == null || typeof current !== 'object') return false;
-        current = (current as Record<string, unknown>)[part];
-      }
+      const current = resolveEventPath(event, key);
       if (String(current) !== expected) return false;
     }
     return true;
