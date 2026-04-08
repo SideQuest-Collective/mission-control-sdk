@@ -111,7 +111,29 @@ describe('KPI Proposals Router', () => {
 
       const res = mockRes();
       await router.routes.post['/propose'](makeAgentReq(validProposalBody), res);
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.body.error).toContain('Select a KPI to replace before proposing');
+      expect(store.createProposal).not.toHaveBeenCalled();
+    });
+
+    it('allows capacity-bound proposals when they nominate an active replacement', async () => {
+      const store = makeStore({
+        countActive: vi.fn(async () => MAX_DYNAMIC_KPIS),
+        getActive: vi.fn(async (_teamSlug: string, kpiId: string) => (
+          kpiId === 'replacement-kpi' ? ({ id: 'replacement-kpi' } as ActiveKpi) : null
+        )),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.post['/propose'](
+        makeAgentReq({ ...validProposalBody, replaces: 'replacement-kpi' }),
+        res,
+      );
+
       expect(res.status).toHaveBeenCalledWith(201);
+      expect(store.createProposal).toHaveBeenCalledTimes(1);
     });
 
     it('rejects duplicate active KPI ID', async () => {

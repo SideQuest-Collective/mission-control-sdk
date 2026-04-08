@@ -111,6 +111,12 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
           });
           return;
         }
+        if (activeCount >= MAX_DYNAMIC_KPIS && !normalizedProposal.replaces) {
+          res.status(409).json({
+            error: `At capacity (${activeCount}/${MAX_DYNAMIC_KPIS}). Select a KPI to replace before proposing.`,
+          });
+          return;
+        }
 
         const now = new Date();
         const proposalId = `kpi-prop-${crypto.randomUUID().slice(0, 8)}`;

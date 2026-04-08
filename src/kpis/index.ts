@@ -13,6 +13,9 @@ export {
   STATIC_PIPELINE_MAP,
   getStaticPipelineDescriptor,
 } from './static-pipelines.js';
+export {
+  planManifestDynamicReconciliation,
+} from './manifest-reconciliation.js';
 export type {
   PipelineDescriptor,
   PipelineSource,
@@ -24,3 +27,7 @@ export type {
   ActiveKpi,
   KpiCatalogEntry,
 } from './types.js';
+export type {
+  ManifestDynamicEntry,
+  ManifestDynamicReconciliationPlan,
+} from './manifest-reconciliation.js';

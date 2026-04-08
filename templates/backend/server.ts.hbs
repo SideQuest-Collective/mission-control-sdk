@@ -21,9 +21,9 @@ import {
 } from '@sidequestteams/mission-control-sdk/backend';
 import { broadcastKpiProposal } from '@sidequestteams/mission-control-sdk/backend/handlers/kpi-mesh-notifier';
 import { SkynetClient } from '@sidequestteams/mission-control-sdk/skynet';
-import { KPI_REGISTRY, getKpisForRolePacks } from '@sidequestteams/mission-control-sdk/kpis';
+import { KPI_REGISTRY, getKpisForRolePacks, planManifestDynamicReconciliation } from '@sidequestteams/mission-control-sdk/kpis';
 import { createKpiRuntimeStore, buildKpiBootstrapStatements } from '@sidequestteams/mission-control-sdk/kpis/kpi-runtime-store';
-import type { ActiveKpi, KpiCatalogEntry } from '@sidequestteams/mission-control-sdk/kpis';
+import type { KpiCatalogEntry } from '@sidequestteams/mission-control-sdk/kpis';
 import type { KpiDefinition, KpiValue, TeamSpecificWidgetDescriptor } from '@sidequestteams/mission-control-sdk/src/types.js';
 import { initKpiPipelineEngine } from './kpi-pipeline-wiring.js';
 
@@ -232,39 +232,26 @@ async function getAllKpiDefinitions(): Promise<KpiDefinition[]> {
 
 async function reconcileManifestDynamicKpis(): Promise<void> {
   const now = new Date().toISOString();
+  const [activeKpis, catalogEntries] = await Promise.all([
+    kpiStore.listActive('{{teamSlug}}'),
+    kpiStore.catalogList('{{teamSlug}}'),
+  ]);
+  const plan = planManifestDynamicReconciliation({
+    teamSlug: '{{teamSlug}}',
+    now,
+    manifestEntries: manifestDynamicEntries,
+    activeKpis,
+    catalogEntries,
+  });
 
-  for (const entry of manifestDynamicEntries) {
-    const existingCatalog = await kpiStore.catalogGet('{{teamSlug}}', entry.definition.id);
-    if (existingCatalog && existingCatalog.status !== 'active') {
-      await kpiStore.deactivate('{{teamSlug}}', entry.definition.id);
-      continue;
-    }
+  for (const kpiId of plan.staleBootstrapIds) {
+    await kpiStore.deactivate('{{teamSlug}}', kpiId);
+    await kpiStore.catalogTransition('{{teamSlug}}', kpiId, 'archived');
+  }
 
-    const activeKpi: ActiveKpi = {
-      id: entry.definition.id,
-      team_slug: '{{teamSlug}}',
-      kpi_definition: entry.definition,
-      pipeline: entry.pipeline,
-      widget_descriptor: entry.widgetDescriptor,
-      origin: 'bootstrap_llm',
-      proposed_by: existingCatalog?.proposed_by,
-      activated_at: existingCatalog?.last_active ?? now,
-    };
-
-    await kpiStore.activate(activeKpi);
-    await kpiStore.catalogUpsert({
-      id: entry.definition.id,
-      team_slug: '{{teamSlug}}',
-      kpi_definition: entry.definition,
-      pipeline: entry.pipeline,
-      origin: 'bootstrap_llm',
-      proposed_by: existingCatalog?.proposed_by,
-      first_registered: existingCatalog?.first_registered ?? now,
-      last_active: now,
-      times_bootstrapped: existingCatalog?.times_bootstrapped ?? 0,
-      replaced_by: existingCatalog?.replaced_by,
-      status: 'active',
-    } satisfies KpiCatalogEntry);
+  for (const entry of plan.activeEntries) {
+    await kpiStore.activate(entry.activeKpi);
+    await kpiStore.catalogUpsert(entry.catalogEntry satisfies KpiCatalogEntry);
   }
 }
 

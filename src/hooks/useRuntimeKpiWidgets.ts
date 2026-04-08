@@ -9,12 +9,17 @@ export interface UseRuntimeKpiWidgetsResult {
   error: Error | null;
 }
 
-function mergeWidgets(
+const MANIFEST_DYNAMIC_WIDGET_SOURCES = new Set(['llm-generated', 'bootstrap-llm']);
+
+export function mergeRuntimeKpiWidgets(
   fallbackWidgets: TeamSpecificWidgetDescriptor[],
   activeKpis: ActiveKpi[],
 ): TeamSpecificWidgetDescriptor[] {
   const merged = new Map<string, TeamSpecificWidgetDescriptor>();
   for (const widget of fallbackWidgets) {
+    if (MANIFEST_DYNAMIC_WIDGET_SOURCES.has(widget.derived_from)) {
+      continue;
+    }
     merged.set(widget.id, widget);
   }
   for (const active of activeKpis) {
@@ -36,7 +41,7 @@ export function useRuntimeKpiWidgets(
     try {
       const data = await fetchApi<{ active: ActiveKpi[] }>('/api/kpis/active');
       if (mountedRef.current) {
-        setWidgets(mergeWidgets(fallbackWidgets, data.active ?? []));
+        setWidgets(mergeRuntimeKpiWidgets(fallbackWidgets, data.active ?? []));
         setError(null);
       }
     } catch (err) {

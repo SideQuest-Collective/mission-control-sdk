@@ -79,10 +79,10 @@ export const STATIC_PIPELINE_MAP: Record<string, PipelineDescriptor> = {
 
   reopen_rate: {
     version: 1,
-    sources: [{ family: 'system.event', filter: { type: 'task_reopened' } }],
+    sources: [{ family: 'system.event', filter: { type: 'task_completed' } }],
     aggregation: {
       type: 'rate',
-      numerator: { type: 'count' },
+      numerator: { type: 'count_where', predicate: { reopened: 'true' } },
       denominator: { type: 'count' },
     },
     window: '7d',
