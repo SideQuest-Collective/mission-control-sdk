@@ -296,6 +296,23 @@ describe('KPI Proposals Router', () => {
       expect(res.body.status).toBe('pending');
     });
 
+    it('returns 404 for proposals owned by another team', async () => {
+      const store = makeStore({
+        getProposal: vi.fn(async () => ({ ...pendingProposal, team_slug: 'team-b' })),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.post['/proposals/:id/vote'](
+        makeAgentReq({ vote: 'approve' }, 'agent-2', { id: 'prop-1' }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(store.castVote).not.toHaveBeenCalled();
+    });
+
     it('rejects spoofed operator votes without authenticated actor resolution', async () => {
       const store = makeStore({
         getProposal: vi.fn(async () => pendingProposal),
@@ -371,9 +388,14 @@ describe('KPI Proposals Router', () => {
       expect(store.castVote).not.toHaveBeenCalled();
     });
 
-    it('transitions to rejected on reject vote', async () => {
+    it('does not reject on a single agent dissent before reject quorum', async () => {
       const store = makeStore({
         getProposal: vi.fn(async () => pendingProposal),
+        countVotes: vi.fn(async () => ({ approve: 1, reject: 1 })),
+        listVotes: vi.fn(async () => [
+          { proposal_id: 'prop-1', voter_id: 'agent-1', voter_type: 'agent', vote: 'approve', voted_at: '2026-04-03T00:30:00.000Z' },
+          { proposal_id: 'prop-1', voter_id: 'agent-2', voter_type: 'agent', vote: 'reject', voted_at: '2026-04-03T01:00:00.000Z' },
+        ]),
       });
       const router = createMockRouter();
       createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
@@ -383,6 +405,30 @@ describe('KPI Proposals Router', () => {
         makeAgentReq({ vote: 'reject' }, 'agent-2', { id: 'prop-1' }),
         res,
       );
+      expect(store.transitionProposal).not.toHaveBeenCalledWith('prop-1', 'rejected', expect.any(String));
+      expect(res.body.status).toBe('pending');
+    });
+
+    it('transitions to rejected when agent reject quorum is met', async () => {
+      const store = makeStore({
+        getProposal: vi.fn(async () => pendingProposal),
+        countVotes: vi.fn(async () => ({ approve: 1, reject: 3 })),
+        listVotes: vi.fn(async () => [
+          { proposal_id: 'prop-1', voter_id: 'agent-1', voter_type: 'agent', vote: 'approve', voted_at: '2026-04-03T00:30:00.000Z' },
+          { proposal_id: 'prop-1', voter_id: 'agent-2', voter_type: 'agent', vote: 'reject', voted_at: '2026-04-03T01:00:00.000Z' },
+          { proposal_id: 'prop-1', voter_id: 'agent-3', voter_type: 'agent', vote: 'reject', voted_at: '2026-04-03T01:10:00.000Z' },
+          { proposal_id: 'prop-1', voter_id: 'agent-4', voter_type: 'agent', vote: 'reject', voted_at: '2026-04-03T01:20:00.000Z' },
+        ]),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.post['/proposals/:id/vote'](
+        makeAgentReq({ vote: 'reject' }, 'agent-4', { id: 'prop-1' }),
+        res,
+      );
+
       expect(store.transitionProposal).toHaveBeenCalledWith('prop-1', 'rejected', expect.any(String));
       expect(res.body.status).toBe('rejected');
     });
@@ -492,6 +538,30 @@ describe('KPI Proposals Router', () => {
       await router.routes.get['/capacity']({}, res);
       expect(store.expireStaleProposals).toHaveBeenCalledTimes(1);
       expect(res.body).toEqual({ active: 7, max: 10, remaining: 3 });
+    });
+  });
+
+  describe('GET /proposals/:id', () => {
+    it('returns 404 for proposals outside the current team', async () => {
+      const foreignTeamProposal: KpiProposalRecord = {
+        id: 'prop-1',
+        team_slug: 'team-b',
+        status: 'pending',
+        proposal: validProposalBody as any,
+        created_at: '2026-04-03T00:00:00.000Z',
+        expires_at: '2026-04-04T00:00:00.000Z',
+      };
+      const store = makeStore({
+        getProposal: vi.fn(async () => foreignTeamProposal),
+      });
+      const router = createMockRouter();
+      createKpiProposalsRouter({ store, teamSlug: 'team-a', rosterSize: 5, resolveActor: makeResolveActor() })(router);
+
+      const res = mockRes();
+      await router.routes.get['/proposals/:id']({ params: { id: 'prop-1' } }, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(store.listVotes).not.toHaveBeenCalled();
     });
   });
 

@@ -59,6 +59,14 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
       return replacement;
     };
 
+    const getTeamScopedProposal = async (proposalId: string): Promise<KpiProposalRecord | null> => {
+      const proposal = await deps.store.getProposal(proposalId);
+      if (!proposal || proposal.team_slug !== deps.teamSlug) {
+        return null;
+      }
+      return proposal;
+    };
+
     // POST /propose — Agent submits a KPI proposal
     router.post('/propose', async (req: any, res: any) => {
       try {
@@ -170,7 +178,7 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
     router.get('/proposals/:id', async (req: any, res: any) => {
       try {
         await expireStale();
-        const proposal = await deps.store.getProposal(req.params.id);
+        const proposal = await getTeamScopedProposal(req.params.id);
         if (!proposal) {
           res.status(404).json({ error: 'Proposal not found' });
           return;
@@ -211,7 +219,7 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
           return;
         }
 
-        const proposal = await deps.store.getProposal(req.params.id);
+        const proposal = await getTeamScopedProposal(req.params.id);
         if (!proposal) {
           res.status(404).json({ error: 'Proposal not found' });
           return;
@@ -255,8 +263,8 @@ export function createKpiProposalsRouter(deps: KpiProposalsRouterDeps) {
           vote,
         });
 
-        // Handle rejection from any gate
-        if (vote === 'reject') {
+        // Operator rejection is a terminal veto; team rejection requires majority quorum.
+        if (actor.type === 'operator' && vote === 'reject') {
           await deps.store.transitionProposal(req.params.id, 'rejected', now);
           res.json({ proposal_id: req.params.id, status: 'rejected' });
           return;
@@ -316,13 +324,20 @@ export async function evaluateApproval(
   proposal: KpiProposalRecord,
   voterType: 'agent' | 'operator',
 ): Promise<string> {
-  const { approve: agentApproves } = await deps.store.countVotes(proposalId);
+  const { approve: agentApproves, reject: agentRejects } = await deps.store.countVotes(proposalId);
   const votes = await deps.store.listVotes(proposalId);
   const operatorApproval = votes.find((v) => v.voter_type === 'operator' && v.vote === 'approve');
+  const operatorReject = votes.find((v) => v.voter_type === 'operator' && v.vote === 'reject');
   const quorum = Math.floor(deps.rosterSize / 2) + 1; // majority = >50%
   const agentQuorumMet = agentApproves >= quorum;
+  const agentRejectQuorumMet = agentRejects >= quorum;
 
   const now = new Date().toISOString();
+
+  if (operatorReject || agentRejectQuorumMet) {
+    await deps.store.transitionProposal(proposalId, 'rejected', now);
+    return 'rejected';
+  }
 
   // Both gates met → activate
   if (agentQuorumMet && operatorApproval) {
