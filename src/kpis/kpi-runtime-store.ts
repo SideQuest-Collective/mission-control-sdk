@@ -40,11 +40,24 @@ export interface KpiRuntimeStore {
 
 // ── Bootstrap DDL ───────────────────────────────────────────────────────
 
+export function quotePostgresIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
+}
+
+function qualifiedTable(schema: string, table: string): string {
+  return `${quotePostgresIdentifier(schema)}.${quotePostgresIdentifier(table)}`;
+}
+
 export function buildKpiBootstrapStatements(schema: string): string[] {
+  const kpiActiveTable = qualifiedTable(schema, 'kpi_active');
+  const kpiProposalsTable = qualifiedTable(schema, 'kpi_proposals');
+  const kpiProposalVotesTable = qualifiedTable(schema, 'kpi_proposal_votes');
+  const kpiCatalogTable = qualifiedTable(schema, 'kpi_catalog');
+
   return [
     // Active dynamic KPIs (max 10 per team)
     [
-      `CREATE TABLE IF NOT EXISTS ${schema}.kpi_active (`,
+      `CREATE TABLE IF NOT EXISTS ${kpiActiveTable} (`,
       `  id TEXT NOT NULL,`,
       `  team_slug TEXT NOT NULL,`,
       `  kpi_definition JSONB NOT NULL,`,
@@ -59,7 +72,7 @@ export function buildKpiBootstrapStatements(schema: string): string[] {
 
     // KPI proposals and their approval state
     [
-      `CREATE TABLE IF NOT EXISTS ${schema}.kpi_proposals (`,
+      `CREATE TABLE IF NOT EXISTS ${kpiProposalsTable} (`,
       `  id TEXT NOT NULL,`,
       `  team_slug TEXT NOT NULL,`,
       `  proposal JSONB NOT NULL,`,
@@ -72,12 +85,12 @@ export function buildKpiBootstrapStatements(schema: string): string[] {
       `)`,
     ].join(' '),
 
-    `CREATE INDEX IF NOT EXISTS idx_kpi_proposals_team_status ON ${schema}.kpi_proposals (team_slug, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_kpi_proposals_team_status ON ${kpiProposalsTable} (team_slug, status)`,
 
     // Individual votes on proposals
     [
-      `CREATE TABLE IF NOT EXISTS ${schema}.kpi_proposal_votes (`,
-      `  proposal_id TEXT NOT NULL REFERENCES ${schema}.kpi_proposals(id),`,
+      `CREATE TABLE IF NOT EXISTS ${kpiProposalVotesTable} (`,
+      `  proposal_id TEXT NOT NULL REFERENCES ${kpiProposalsTable}(id),`,
       `  voter_id TEXT NOT NULL,`,
       `  voter_type TEXT NOT NULL,`,
       `  vote TEXT NOT NULL,`,
@@ -89,7 +102,7 @@ export function buildKpiBootstrapStatements(schema: string): string[] {
 
     // Durable catalog (cross-bootstrap history)
     [
-      `CREATE TABLE IF NOT EXISTS ${schema}.kpi_catalog (`,
+      `CREATE TABLE IF NOT EXISTS ${kpiCatalogTable} (`,
       `  id TEXT NOT NULL,`,
       `  team_slug TEXT NOT NULL,`,
       `  kpi_definition JSONB NOT NULL,`,
@@ -107,18 +120,23 @@ export function buildKpiBootstrapStatements(schema: string): string[] {
       `)`,
     ].join(' '),
 
-    `CREATE INDEX IF NOT EXISTS idx_kpi_catalog_team_status ON ${schema}.kpi_catalog (team_slug, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_kpi_catalog_team_status ON ${kpiCatalogTable} (team_slug, status)`,
   ];
 }
 
 // ── PostgreSQL implementation ───────────────────────────────────────────
 
 export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeStore {
+  const kpiActiveTable = qualifiedTable(schema, 'kpi_active');
+  const kpiProposalsTable = qualifiedTable(schema, 'kpi_proposals');
+  const kpiProposalVotesTable = qualifiedTable(schema, 'kpi_proposal_votes');
+  const kpiCatalogTable = qualifiedTable(schema, 'kpi_catalog');
+
   // ── Active KPIs ─────────────────────────────────────────
 
   const listActive = async (teamSlug: string): Promise<ActiveKpi[]> => {
     const result = await pool.query(
-      `SELECT id, team_slug, kpi_definition, pipeline, widget_descriptor, origin, proposed_by, activated_at FROM ${schema}.kpi_active WHERE team_slug = $1 ORDER BY activated_at`,
+      `SELECT id, team_slug, kpi_definition, pipeline, widget_descriptor, origin, proposed_by, activated_at FROM ${kpiActiveTable} WHERE team_slug = $1 ORDER BY activated_at`,
       [teamSlug],
     );
     return result.rows.map(rowToActiveKpi);
@@ -126,7 +144,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
 
   const getActive = async (teamSlug: string, kpiId: string): Promise<ActiveKpi | null> => {
     const result = await pool.query(
-      `SELECT id, team_slug, kpi_definition, pipeline, widget_descriptor, origin, proposed_by, activated_at FROM ${schema}.kpi_active WHERE team_slug = $1 AND id = $2 LIMIT 1`,
+      `SELECT id, team_slug, kpi_definition, pipeline, widget_descriptor, origin, proposed_by, activated_at FROM ${kpiActiveTable} WHERE team_slug = $1 AND id = $2 LIMIT 1`,
       [teamSlug, kpiId],
     );
     if ((result.rowCount ?? 0) < 1) return null;
@@ -136,7 +154,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
   const activate = async (entry: ActiveKpi): Promise<void> => {
     await pool.query(
       [
-        `INSERT INTO ${schema}.kpi_active (id, team_slug, kpi_definition, pipeline, widget_descriptor, origin, proposed_by, activated_at)`,
+        `INSERT INTO ${kpiActiveTable} (id, team_slug, kpi_definition, pipeline, widget_descriptor, origin, proposed_by, activated_at)`,
         `VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6, $7, $8)`,
         `ON CONFLICT (team_slug, id)`,
         `DO UPDATE SET kpi_definition = EXCLUDED.kpi_definition, pipeline = EXCLUDED.pipeline,`,
@@ -158,14 +176,14 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
 
   const deactivate = async (teamSlug: string, kpiId: string): Promise<void> => {
     await pool.query(
-      `DELETE FROM ${schema}.kpi_active WHERE team_slug = $1 AND id = $2`,
+      `DELETE FROM ${kpiActiveTable} WHERE team_slug = $1 AND id = $2`,
       [teamSlug, kpiId],
     );
   };
 
   const countActive = async (teamSlug: string): Promise<number> => {
     const result = await pool.query(
-      `SELECT COUNT(*)::int AS cnt FROM ${schema}.kpi_active WHERE team_slug = $1`,
+      `SELECT COUNT(*)::int AS cnt FROM ${kpiActiveTable} WHERE team_slug = $1`,
       [teamSlug],
     );
     return result.rows[0]?.cnt ?? 0;
@@ -176,7 +194,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
   const createProposal = async (record: KpiProposalRecord): Promise<void> => {
     await pool.query(
       [
-        `INSERT INTO ${schema}.kpi_proposals (id, team_slug, proposal, status, replaces_kpi_id, created_at, resolved_at, expires_at)`,
+        `INSERT INTO ${kpiProposalsTable} (id, team_slug, proposal, status, replaces_kpi_id, created_at, resolved_at, expires_at)`,
         `VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8)`,
       ].join(' '),
       [
@@ -194,7 +212,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
 
   const getProposal = async (proposalId: string): Promise<KpiProposalRecord | null> => {
     const result = await pool.query(
-      `SELECT id, team_slug, proposal, status, replaces_kpi_id, created_at, resolved_at, expires_at FROM ${schema}.kpi_proposals WHERE id = $1 LIMIT 1`,
+      `SELECT id, team_slug, proposal, status, replaces_kpi_id, created_at, resolved_at, expires_at FROM ${kpiProposalsTable} WHERE id = $1 LIMIT 1`,
       [proposalId],
     );
     if ((result.rowCount ?? 0) < 1) return null;
@@ -204,13 +222,13 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
   const listProposals = async (teamSlug: string, status?: string): Promise<KpiProposalRecord[]> => {
     if (status) {
       const result = await pool.query(
-        `SELECT id, team_slug, proposal, status, replaces_kpi_id, created_at, resolved_at, expires_at FROM ${schema}.kpi_proposals WHERE team_slug = $1 AND status = $2 ORDER BY created_at DESC`,
+        `SELECT id, team_slug, proposal, status, replaces_kpi_id, created_at, resolved_at, expires_at FROM ${kpiProposalsTable} WHERE team_slug = $1 AND status = $2 ORDER BY created_at DESC`,
         [teamSlug, status],
       );
       return result.rows.map(rowToProposal);
     }
     const result = await pool.query(
-      `SELECT id, team_slug, proposal, status, replaces_kpi_id, created_at, resolved_at, expires_at FROM ${schema}.kpi_proposals WHERE team_slug = $1 ORDER BY created_at DESC`,
+      `SELECT id, team_slug, proposal, status, replaces_kpi_id, created_at, resolved_at, expires_at FROM ${kpiProposalsTable} WHERE team_slug = $1 ORDER BY created_at DESC`,
       [teamSlug],
     );
     return result.rows.map(rowToProposal);
@@ -218,7 +236,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
 
   const setProposalReplacement = async (proposalId: string, replacesKpiId: string): Promise<void> => {
     await pool.query(
-      `UPDATE ${schema}.kpi_proposals SET replaces_kpi_id = $2 WHERE id = $1`,
+      `UPDATE ${kpiProposalsTable} SET replaces_kpi_id = $2 WHERE id = $1`,
       [proposalId, replacesKpiId],
     );
   };
@@ -226,12 +244,12 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
   const transitionProposal = async (proposalId: string, status: string, resolvedAt?: string): Promise<void> => {
     if (resolvedAt) {
       await pool.query(
-        `UPDATE ${schema}.kpi_proposals SET status = $2, resolved_at = $3 WHERE id = $1`,
+        `UPDATE ${kpiProposalsTable} SET status = $2, resolved_at = $3 WHERE id = $1`,
         [proposalId, status, resolvedAt],
       );
     } else {
       await pool.query(
-        `UPDATE ${schema}.kpi_proposals SET status = $2 WHERE id = $1`,
+        `UPDATE ${kpiProposalsTable} SET status = $2 WHERE id = $1`,
         [proposalId, status],
       );
     }
@@ -240,7 +258,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
   const expireStaleProposals = async (): Promise<number> => {
     const result = await pool.query(
       [
-        `UPDATE ${schema}.kpi_proposals`,
+        `UPDATE ${kpiProposalsTable}`,
         `SET status = 'expired', resolved_at = NOW()`,
         `WHERE status IN ('pending', 'team_voted', 'operator_pending') AND expires_at < NOW()`,
         `RETURNING team_slug, proposal, created_at, resolved_at`,
@@ -255,7 +273,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
 
       await pool.query(
         [
-          `INSERT INTO ${schema}.kpi_catalog (id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status, updated_at)`,
+          `INSERT INTO ${kpiCatalogTable} (id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status, updated_at)`,
           `VALUES ($1, $2, $3::jsonb, $4::jsonb, 'runtime_agent', $5, $6, $7, 0, NULL, 'rejected', NOW())`,
           `ON CONFLICT (team_slug, id)`,
           `DO UPDATE SET`,
@@ -293,7 +311,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
   const castVote = async (vote: KpiProposalVote): Promise<void> => {
     await pool.query(
       [
-        `INSERT INTO ${schema}.kpi_proposal_votes (proposal_id, voter_id, voter_type, vote, reason, voted_at)`,
+        `INSERT INTO ${kpiProposalVotesTable} (proposal_id, voter_id, voter_type, vote, reason, voted_at)`,
         `VALUES ($1, $2, $3, $4, $5, $6)`,
         `ON CONFLICT (proposal_id, voter_id)`,
         `DO UPDATE SET vote = EXCLUDED.vote, reason = EXCLUDED.reason, voted_at = EXCLUDED.voted_at`,
@@ -304,7 +322,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
 
   const listVotes = async (proposalId: string): Promise<KpiProposalVote[]> => {
     const result = await pool.query(
-      `SELECT proposal_id, voter_id, voter_type, vote, reason, voted_at FROM ${schema}.kpi_proposal_votes WHERE proposal_id = $1 ORDER BY voted_at`,
+      `SELECT proposal_id, voter_id, voter_type, vote, reason, voted_at FROM ${kpiProposalVotesTable} WHERE proposal_id = $1 ORDER BY voted_at`,
       [proposalId],
     );
     return result.rows.map(rowToVote);
@@ -312,7 +330,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
 
   const countVotes = async (proposalId: string): Promise<{ approve: number; reject: number }> => {
     const result = await pool.query(
-      `SELECT vote, COUNT(*)::int AS cnt FROM ${schema}.kpi_proposal_votes WHERE proposal_id = $1 AND voter_type = 'agent' GROUP BY vote`,
+      `SELECT vote, COUNT(*)::int AS cnt FROM ${kpiProposalVotesTable} WHERE proposal_id = $1 AND voter_type = 'agent' GROUP BY vote`,
       [proposalId],
     );
     let approve = 0;
@@ -329,13 +347,13 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
   const catalogList = async (teamSlug: string, status?: string): Promise<KpiCatalogEntry[]> => {
     if (status) {
       const result = await pool.query(
-        `SELECT id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status FROM ${schema}.kpi_catalog WHERE team_slug = $1 AND status = $2 ORDER BY last_active DESC`,
+        `SELECT id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status FROM ${kpiCatalogTable} WHERE team_slug = $1 AND status = $2 ORDER BY last_active DESC`,
         [teamSlug, status],
       );
       return result.rows.map(rowToCatalogEntry);
     }
     const result = await pool.query(
-      `SELECT id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status FROM ${schema}.kpi_catalog WHERE team_slug = $1 ORDER BY last_active DESC`,
+      `SELECT id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status FROM ${kpiCatalogTable} WHERE team_slug = $1 ORDER BY last_active DESC`,
       [teamSlug],
     );
     return result.rows.map(rowToCatalogEntry);
@@ -343,7 +361,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
 
   const catalogGet = async (teamSlug: string, kpiId: string): Promise<KpiCatalogEntry | null> => {
     const result = await pool.query(
-      `SELECT id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status FROM ${schema}.kpi_catalog WHERE team_slug = $1 AND id = $2 LIMIT 1`,
+      `SELECT id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status FROM ${kpiCatalogTable} WHERE team_slug = $1 AND id = $2 LIMIT 1`,
       [teamSlug, kpiId],
     );
     if ((result.rowCount ?? 0) < 1) return null;
@@ -353,7 +371,7 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
   const catalogUpsert = async (entry: KpiCatalogEntry): Promise<void> => {
     await pool.query(
       [
-        `INSERT INTO ${schema}.kpi_catalog (id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status, updated_at)`,
+        `INSERT INTO ${kpiCatalogTable} (id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status, updated_at)`,
         `VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8, $9, $10, $11, NOW())`,
         `ON CONFLICT (team_slug, id)`,
         `DO UPDATE SET kpi_definition = EXCLUDED.kpi_definition, pipeline = EXCLUDED.pipeline,`,
@@ -380,12 +398,12 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
   const catalogTransition = async (teamSlug: string, kpiId: string, status: string, replacedBy?: string): Promise<void> => {
     if (replacedBy) {
       await pool.query(
-        `UPDATE ${schema}.kpi_catalog SET status = $3, replaced_by = $4, updated_at = NOW() WHERE team_slug = $1 AND id = $2`,
+        `UPDATE ${kpiCatalogTable} SET status = $3, replaced_by = $4, updated_at = NOW() WHERE team_slug = $1 AND id = $2`,
         [teamSlug, kpiId, status, replacedBy],
       );
     } else {
       await pool.query(
-        `UPDATE ${schema}.kpi_catalog SET status = $3, updated_at = NOW() WHERE team_slug = $1 AND id = $2`,
+        `UPDATE ${kpiCatalogTable} SET status = $3, updated_at = NOW() WHERE team_slug = $1 AND id = $2`,
         [teamSlug, kpiId, status],
       );
     }
@@ -395,14 +413,14 @@ export function createKpiRuntimeStore(pool: Pool, schema: string): KpiRuntimeSto
     if (kpiIds.length === 0) return;
     // Use ANY($1::text[]) for safe parameterized IN
     await pool.query(
-      `UPDATE ${schema}.kpi_catalog SET times_bootstrapped = times_bootstrapped + 1, last_active = NOW(), updated_at = NOW() WHERE team_slug = $1 AND id = ANY($2::text[])`,
+      `UPDATE ${kpiCatalogTable} SET times_bootstrapped = times_bootstrapped + 1, last_active = NOW(), updated_at = NOW() WHERE team_slug = $1 AND id = ANY($2::text[])`,
       [teamSlug, kpiIds],
     );
   };
 
   const catalogExportSnapshot = async (teamSlug: string): Promise<KpiCatalogEntry[]> => {
     const result = await pool.query(
-      `SELECT id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status FROM ${schema}.kpi_catalog WHERE team_slug = $1 ORDER BY last_active DESC`,
+      `SELECT id, team_slug, kpi_definition, pipeline, origin, proposed_by, first_registered, last_active, times_bootstrapped, replaced_by, status FROM ${kpiCatalogTable} WHERE team_slug = $1 ORDER BY last_active DESC`,
       [teamSlug],
     );
     return result.rows.map(rowToCatalogEntry);

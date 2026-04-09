@@ -22,7 +22,11 @@ import {
 import { broadcastKpiProposal } from '@sidequestteams/mission-control-sdk/backend/handlers/kpi-mesh-notifier';
 import { SkynetClient } from '@sidequestteams/mission-control-sdk/skynet';
 import { KPI_REGISTRY, getKpisForRolePacks, planManifestDynamicReconciliation } from '@sidequestteams/mission-control-sdk/kpis';
-import { createKpiRuntimeStore, buildKpiBootstrapStatements } from '@sidequestteams/mission-control-sdk/kpis/kpi-runtime-store';
+import {
+  createKpiRuntimeStore,
+  buildKpiBootstrapStatements,
+  quotePostgresIdentifier,
+} from '@sidequestteams/mission-control-sdk/kpis/kpi-runtime-store';
 import type { KpiCatalogEntry } from '@sidequestteams/mission-control-sdk/kpis';
 import type { KpiDefinition, KpiValue, TeamSpecificWidgetDescriptor } from '@sidequestteams/mission-control-sdk/src/types.js';
 import { initKpiPipelineEngine } from './kpi-pipeline-wiring.js';
@@ -480,7 +484,7 @@ setInterval(() => {
 
 async function bootstrapRuntime(): Promise<void> {
   await retryKpiBootstrap(async () => {
-    await kpiPool.query(`CREATE SCHEMA IF NOT EXISTS ${kpiSchema}`);
+    await kpiPool.query(`CREATE SCHEMA IF NOT EXISTS ${quotePostgresIdentifier(kpiSchema)}`);
     for (const stmt of buildKpiBootstrapStatements(kpiSchema)) {
       await kpiPool.query(stmt);
     }

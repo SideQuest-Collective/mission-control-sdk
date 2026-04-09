@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Pool, QueryResult } from 'pg';
 import type { ActiveKpi, KpiProposalRecord, KpiProposalVote, KpiCatalogEntry } from '../../kpis/types.js';
-import { createKpiRuntimeStore, buildKpiBootstrapStatements } from '../../kpis/kpi-runtime-store.js';
+import {
+  createKpiRuntimeStore,
+  buildKpiBootstrapStatements,
+  quotePostgresIdentifier,
+} from '../../kpis/kpi-runtime-store.js';
 
 function makePool(queryFn: (...args: any[]) => any): Pool {
   return { query: vi.fn(queryFn) } as unknown as Pool;
@@ -59,12 +63,24 @@ describe('buildKpiBootstrapStatements', () => {
   it('returns DDL for 4 tables + 2 indexes', () => {
     const stmts = buildKpiBootstrapStatements('my_schema');
     expect(stmts).toHaveLength(6);
-    expect(stmts[0]).toContain('my_schema.kpi_active');
-    expect(stmts[1]).toContain('my_schema.kpi_proposals');
+    expect(stmts[0]).toContain('"my_schema"."kpi_active"');
+    expect(stmts[1]).toContain('"my_schema"."kpi_proposals"');
     expect(stmts[2]).toContain('idx_kpi_proposals_team_status');
-    expect(stmts[3]).toContain('my_schema.kpi_proposal_votes');
-    expect(stmts[4]).toContain('my_schema.kpi_catalog');
+    expect(stmts[3]).toContain('"my_schema"."kpi_proposal_votes"');
+    expect(stmts[4]).toContain('"my_schema"."kpi_catalog"');
     expect(stmts[5]).toContain('idx_kpi_catalog_team_status');
+  });
+
+  it('quotes custom schema identifiers for mixed-case names', () => {
+    const stmts = buildKpiBootstrapStatements('Team-KPIs');
+    expect(stmts[0]).toContain('"Team-KPIs"."kpi_active"');
+    expect(stmts[3]).toContain('REFERENCES "Team-KPIs"."kpi_proposals"(id)');
+  });
+});
+
+describe('quotePostgresIdentifier', () => {
+  it('escapes embedded quotes in identifiers', () => {
+    expect(quotePostgresIdentifier('Team"KPIs')).toBe('"Team""KPIs"');
   });
 });
 
