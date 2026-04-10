@@ -86,7 +86,8 @@ export class KpiProjection {
       id: this.kpiId,
       value,
       delta,
-      trend: this.recentValues.length >= 2 ? [...this.recentValues] : undefined,
+      trend,
+      recentValues: this.recentValues.length >= 2 ? [...this.recentValues] : undefined,
       freshness,
       source: `projection:${this.sourceFamily}`,
     };

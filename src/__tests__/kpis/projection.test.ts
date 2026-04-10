@@ -125,9 +125,9 @@ describe('KpiProjection', () => {
     }
 
     const v = proj.compute(BASE_TIME + 400);
-    // trend should be an array of recent values
+    // trend should be the linear regression slope (a number)
     expect(v.trend).toBeDefined();
-    expect(v.trend!.length).toBeGreaterThanOrEqual(2);
+    expect(typeof v.trend).toBe('number');
   });
 
   it('source is set correctly', () => {

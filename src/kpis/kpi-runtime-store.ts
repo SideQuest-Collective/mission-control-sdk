@@ -27,6 +27,7 @@ export interface KpiRuntimeStore {
   // ── Votes ───────────────────────────────────────────────
   castVote(vote: KpiProposalVote): Promise<void>;
   listVotes(proposalId: string): Promise<KpiProposalVote[]>;
+  /** Count agent votes only (excludes operator votes). Used for team quorum checks. */
   countVotes(proposalId: string): Promise<{ approve: number; reject: number }>;
 
   // ── Catalog ─────────────────────────────────────────────

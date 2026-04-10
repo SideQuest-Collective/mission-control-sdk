@@ -117,7 +117,8 @@ export interface KpiValue {
   id: string;
   value: number | string;
   delta?: number;
-  trend?: number[];
+  trend?: number;
+  recentValues?: number[];
   freshness: 'live' | 'stale' | 'mock';
   source: string;
 }

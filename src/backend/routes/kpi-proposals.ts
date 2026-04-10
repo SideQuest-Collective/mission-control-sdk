@@ -339,8 +339,9 @@ export async function evaluateApproval(
     return 'rejected';
   }
 
-  // Both gates met → activate
+  // Both gates met → approved → activate → active
   if (agentQuorumMet && operatorApproval) {
+    await deps.store.transitionProposal(proposalId, 'approved', now);
     await activateFromProposal(deps, proposal);
     return 'active';
   }
@@ -372,6 +373,19 @@ async function activateFromProposal(
   const kpi = proposal.proposal.kpi;
   const now = new Date().toISOString();
   const proposedBy = proposal.proposal.proposed_by ?? kpi.agent_id;
+
+  // Re-check capacity right before activation to narrow the race window
+  // between the initial cap check (at vote time) and actual activation.
+  if (!proposal.replaces_kpi_id) {
+    const currentCount = await deps.store.countActive(deps.teamSlug);
+    if (currentCount >= MAX_DYNAMIC_KPIS) {
+      await deps.store.transitionProposal(proposal.id, 'rejected', now);
+      throw new RouteError(
+        `At capacity (${currentCount}/${MAX_DYNAMIC_KPIS}) at activation time. Proposal rejected.`,
+        409,
+      );
+    }
+  }
 
   // If replacing, deactivate the old KPI first
   if (proposal.replaces_kpi_id) {

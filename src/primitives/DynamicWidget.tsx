@@ -34,8 +34,8 @@ function resolveConfig(descriptor: TeamSpecificWidgetDescriptor, kpis: KpiValue[
     return descriptor.config;
   }
 
-  const data = Array.isArray(kpi.trend)
-    ? kpi.trend
+  const data = Array.isArray(kpi.recentValues)
+    ? kpi.recentValues
     : typeof kpi.value === 'number'
       ? [kpi.value]
       : [];
