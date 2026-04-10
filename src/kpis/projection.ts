@@ -23,6 +23,11 @@ export class KpiProjection {
   private hasReceivedEvents = false;
 
   constructor(definition: KpiDefinition, pipeline: PipelineDescriptor) {
+    if (pipeline.sources.length > 1) {
+      console.warn(
+        `[KpiProjection] Pipeline for "${definition.id}" has ${pipeline.sources.length} sources; only the first is used (multi-source not yet supported)`,
+      );
+    }
     this.kpiId = definition.id;
     this.definition = definition;
     this.pipeline = pipeline;
