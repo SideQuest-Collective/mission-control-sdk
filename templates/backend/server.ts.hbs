@@ -121,6 +121,7 @@ const kpiStore = createKpiRuntimeStore(kpiPool, kpiSchema);
 let projectionEngine: Awaited<ReturnType<typeof initKpiPipelineEngine>> | null = null;
 const KPI_BOOTSTRAP_MAX_ATTEMPTS = Number(process.env.KPI_BOOTSTRAP_MAX_ATTEMPTS ?? 12);
 const KPI_BOOTSTRAP_RETRY_DELAY_MS = Number(process.env.KPI_BOOTSTRAP_RETRY_DELAY_MS ?? 5000);
+let kpiBootstrapReady: Promise<void>;
 
 function envKeyForAgentGatewayToken(agentId: string): string {
   return `OPENCLAW_GATEWAY_TOKEN_${agentId.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
@@ -259,6 +260,16 @@ async function reconcileManifestDynamicKpis(): Promise<void> {
   }
 }
 
+async function ensureKpiBootstrapReady(_req: any, res: any, next: any): Promise<void> {
+  try {
+    await kpiBootstrapReady;
+    next();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'KPI bootstrap failed';
+    res.status(503).json({ error: `KPI bootstrap unavailable: ${message}` });
+  }
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -293,6 +304,7 @@ app.use('/api/agents', agentsRouter);
 
 // ── KPI routes ─────────────────────────────────────────────────────────
 const kpisRouter = express.Router();
+kpisRouter.use(ensureKpiBootstrapReady);
 createKpisRouter({
   async getKpis(rolePacks) {
     const packs = rolePacks ?? teamBlock?.role_packs ?? [];
@@ -385,6 +397,7 @@ app.use('/api/usage', usageRouter);
 
 // ── KPI Proposals routes (runtime registration) ──────────────────────────
 const kpiProposalsRouter = express.Router();
+kpiProposalsRouter.use(ensureKpiBootstrapReady);
 const skynetHttpUrl = teamBlock?.connectivity?.skynet?.http_url ?? 'http://skynet:8080';
 const gatewayToken = process.env.SKYNET_OPS_TOKEN ?? process.env.OPENCLAW_GATEWAY_TOKEN ?? '';
 
@@ -503,7 +516,9 @@ async function bootstrapRuntime(): Promise<void> {
   });
 }
 
-bootstrapRuntime()
+kpiBootstrapReady = bootstrapRuntime();
+
+kpiBootstrapReady
   .then(() => {
     server.listen(PORT, () => {
       console.log(`[{{teamSlug}}] Mission Control backend listening on :${PORT}`);
