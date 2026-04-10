@@ -7,10 +7,16 @@ import {
   KpiProposalWidget,
 } from '@sidequestteams/mission-control-sdk/widgets';
 import { DynamicWidget } from '@sidequestteams/mission-control-sdk/primitives';
-import { useKpis, useManifest, useRuntimeKpiWidgets } from '@sidequestteams/mission-control-sdk/hooks';
+import {
+  configureApiClient,
+  useKpis,
+  useManifest,
+  useRuntimeKpiWidgets,
+} from '@sidequestteams/mission-control-sdk/hooks';
 import { useTheme } from '@sidequestteams/mission-control-sdk/theme';
 
 const TEAM_SPECIFIC_WIDGETS = {{{json teamSpecificWidgets}}};
+const API_AUTH_TOKEN = process.env.NEXT_PUBLIC_API_AUTH_TOKEN?.trim() ?? '';
 const GRID_SPAN_CLASS = {
   1: 'col-span-1',
   2: 'col-span-2',
@@ -25,6 +31,13 @@ const GRID_SPAN_CLASS = {
   11: 'col-span-11',
   12: 'col-span-12',
 } as const;
+
+configureApiClient({
+  baseUrl: process.env.NEXT_PUBLIC_API_URL ?? '/api',
+  headers: API_AUTH_TOKEN
+    ? { Authorization: `Bearer ${API_AUTH_TOKEN}` }
+    : undefined,
+});
 
 export default function Dashboard() {
   const { team, loading } = useManifest();

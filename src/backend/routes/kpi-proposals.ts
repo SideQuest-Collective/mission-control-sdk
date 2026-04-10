@@ -341,7 +341,6 @@ export async function evaluateApproval(
 
   // Both gates met → activate
   if (agentQuorumMet && operatorApproval) {
-    await deps.store.transitionProposal(proposalId, 'approved', now);
     await activateFromProposal(deps, proposal);
     return 'active';
   }

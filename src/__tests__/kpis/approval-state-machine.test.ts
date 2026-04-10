@@ -233,7 +233,7 @@ describe('Approval State Machine', () => {
   });
 
   describe('proposal transitions to active status after activation', () => {
-    it('transitions proposal from approved to active', async () => {
+    it('transitions proposal directly to active after activation succeeds', async () => {
       const store = makeStore({
         countVotes: vi.fn(async () => ({ approve: 3, reject: 0 })),
         listVotes: vi.fn(async () => [
@@ -241,10 +241,29 @@ describe('Approval State Machine', () => {
         ]),
       });
       await evaluateApproval(makeDeps(store), 'prop-1', { ...baseProposal, status: 'operator_pending' }, 'operator');
-      // Should have two transitionProposal calls: approved, then active
       const calls = (store.transitionProposal as any).mock.calls;
-      expect(calls[0][1]).toBe('approved');
-      expect(calls[1][1]).toBe('active');
+      expect(calls).toHaveLength(1);
+      expect(calls[0][1]).toBe('active');
+    });
+
+    it('does not persist approved state when activation fails', async () => {
+      const store = makeStore({
+        activate: vi.fn(async () => {
+          throw new Error('transient db failure');
+        }),
+        countVotes: vi.fn(async () => ({ approve: 3, reject: 0 })),
+        listVotes: vi.fn(async () => [
+          { proposal_id: 'prop-1', voter_id: 'operator', voter_type: 'operator', vote: 'approve', voted_at: '2026-04-03T02:00:00.000Z' },
+        ]),
+      });
+
+      await expect(
+        evaluateApproval(makeDeps(store), 'prop-1', { ...baseProposal, status: 'operator_pending' }, 'operator'),
+      ).rejects.toThrow('transient db failure');
+
+      const statuses = (store.transitionProposal as any).mock.calls.map((call: unknown[]) => call[1]);
+      expect(statuses).not.toContain('approved');
+      expect(statuses).not.toContain('active');
     });
   });
 });

@@ -6,6 +6,11 @@ const nextConfig = {
   reactStrictMode: true,
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? '/api',
+    NEXT_PUBLIC_API_AUTH_TOKEN:
+      process.env.NEXT_PUBLIC_API_AUTH_TOKEN
+      ?? process.env.OPENCLAW_GATEWAY_TOKEN
+      ?? process.env.SKYNET_OPS_TOKEN
+      ?? '',
     NEXT_PUBLIC_TEAM_SLUG: '{{teamSlug}}',
     NEXT_PUBLIC_TEAM_NAME: '{{teamName}}',
   },
