@@ -127,5 +127,6 @@ describe('planManifestDynamicReconciliation', () => {
     expect(plan.activeEntries[0].activeKpi.activated_at).toBe('2026-04-06T00:00:00.000Z');
     expect(plan.activeEntries[0].catalogEntry.first_registered).toBe('2026-04-01T00:00:00.000Z');
     expect(plan.activeEntries[0].catalogEntry.last_active).toBe(now);
+    expect(plan.activeEntries[0].catalogEntry.times_bootstrapped).toBe(3);
   });
 });

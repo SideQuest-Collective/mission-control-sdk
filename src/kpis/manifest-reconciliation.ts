@@ -56,7 +56,7 @@ export function planManifestDynamicReconciliation(
           proposed_by: existingCatalog?.proposed_by,
           first_registered: existingCatalog?.first_registered ?? input.now,
           last_active: input.now,
-          times_bootstrapped: existingCatalog?.times_bootstrapped ?? 0,
+          times_bootstrapped: (existingCatalog?.times_bootstrapped ?? 0) + 1,
           replaced_by: existingCatalog?.replaced_by,
           status: 'active',
         },
